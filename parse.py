@@ -52,9 +52,14 @@ def print_tree(tree, indent=0):
     for child in tree.children:
       print_tree(child, indent + 1)
   elif logger.isEnabledFor(logging.DEBUG):
-    value = str(tree)[:50] + "..." if len(str(tree)) > 50 else str(tree)
+    # Use repr() to properly escape special characters
+    value = repr(str(tree))
+    # Truncate long values but keep them as valid repr strings
+    if len(value) > 50:
+      value = value[:47] + '...' + value[0]  # Keep closing quote
+    
     prefix = f"Token({tree.type}): " if hasattr(tree, "type") else ""
-    print("  " * indent + f'{prefix}"{value}"')
+    print("  " * indent + f'{prefix}{value}')
 
 
 def handle_parse_error(e, content):
@@ -155,8 +160,8 @@ def main():
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
 
-  parser.add_argument("grammar", type=Path, nargs="?", default=CONTEXT / "grammar/TLA.lark", help="Lark grammar file")
-  parser.add_argument("document", type=Path, nargs="?", default=CONTEXT / "spec/example.tla", help="Document to parse")
+  parser.add_argument("document", type=Path, nargs="?", default=CONTEXT / "spec/example.dsl", help="Document to parse")
+  parser.add_argument("-g", "--grammar", type=Path, default=CONTEXT / "grammar/TLA.lark", help="Lark grammar file")
   parser.add_argument("-d", "--debug", action="store_true", help="Show debug output")
   parser.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
 

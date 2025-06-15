@@ -1,5 +1,5 @@
-// Natural Language Specification DSL - Lark Grammar
-// Fixed version with proper operation handling
+// Natural Language Specification DSL - CST-oriented Grammar
+// Preserves document structure with flexible indentation
 
 ?start: specification
 
@@ -39,18 +39,26 @@ state_properties: (INDENT property_line)+
 property_line: text_line NEWLINE
 
 // ============ Operations Section ============
-// Made operations optional with ? and changed to operation*
 operations: operation*
 
-operation: NEWLINE "When" WS trigger ":" NEWLINE preconditions INDENT "Then:" NEWLINE effects
+operation: NEWLINE "When" WS trigger ":" NEWLINE operation_body
+
+operation_body: preconditions transition_marker effects
 
 trigger: text_line
 
+// Allow preconditions with base indentation
 preconditions: (INDENT precondition_line)*
 
 precondition_line: text_line NEWLINE
 
-effects: (INDENT "-" WS* effect_line)+
+// Transition marker at same indentation as preconditions
+transition_marker: INDENT "Then:" NEWLINE
+
+// Effects with nested indentation (4 spaces)
+effects: effect+
+
+effect: DOUBLE_INDENT "-" WS* effect_line
 
 effect_line: text_line NEWLINE
 
@@ -84,10 +92,10 @@ WORD: /[a-zA-Z][a-zA-Z0-9_]*/
 NUMBER: /[0-9]+/
 SYMBOL: /[.,;:!?\-_()\/'"@#$%&*+=\[\]{}|\\<>~`^]/
 
-// Whitespace
+// Whitespace - preserve exact indentation for CST
 WS: /[ \t]+/
-INDENT: /  /  // Two spaces
+INDENT: /  /           // Exactly 2 spaces
+DOUBLE_INDENT: /    /  // Exactly 4 spaces
 NEWLINE: /\r?\n/
 
-// Ignore extra whitespace between tokens
-%ignore /[ \t]+(?=[ \t])/  // Collapse multiple spaces
+// Don't ignore any whitespace - we want it in the CST
