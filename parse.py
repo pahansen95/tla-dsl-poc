@@ -359,13 +359,17 @@ Examples:
   )
 
   parser.add_argument(
-    "grammar", type=Path, nargs="?", default=(CONTEXT / "TLA.bnf"), help="Path to BNF grammar file (default: TLA.bnf)"
+    "grammar",
+    type=Path,
+    nargs="?",
+    default=(CONTEXT / "grammar/TLA.lark"),
+    help="Path to BNF grammar file (default: grammar/TLA.lark)",
   )
   parser.add_argument(
     "document",
     type=Path,
     nargs="?",
-    default=(CONTEXT / "spec.tla"),
+    default=(CONTEXT / "spec/example.tla"),
     help="Path to document to parse (default: spec.tla)",
   )
   parser.add_argument("--quiet", "-q", action="store_true", help="Suppress output (sets log level to WARNING)")
