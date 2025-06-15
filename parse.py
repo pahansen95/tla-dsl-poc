@@ -171,13 +171,24 @@ def validate_grammar(grammar_path, document_path):
 
 def main():
   parser = argparse.ArgumentParser(description="Test BNF grammar against specification documents")
+
+  # Make positional args optional with nargs='?'
   parser.add_argument(
-    "grammar", type=Path, default=(CONTEXT / "TLA.bnf").as_posix(), help="Path to BNF grammar file"
+    "--bnf",
+    type=Path,
+    default=CONTEXT / "TLA.bnf",
+    help="Path to BNF grammar file (default: TLA.bnf)",
   )
+
   parser.add_argument(
-    "document", type=Path, default=(CONTEXT / "spec.tla").as_posix(), help="Path to document to parse"
+    "--doc",
+    nargs="?",  # Makes it optional
+    type=Path,
+    default=CONTEXT / "spec.tla",
+    help="Path to document to parse (default: spec.tla)",
   )
-  parser.add_argument("--debug", action="store_true", help="Show debug output")
+
+  parser.add_argument("--quiet", action="store_false", help="Suppress debug output")
 
   args = parser.parse_args()
 
