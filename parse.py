@@ -62,7 +62,9 @@ def handle_parse_error(e, content):
   if isinstance(e, exceptions.UnexpectedCharacters):
     logger.error("\nParse Error - Unexpected Character:")
     logger.error(f"  Line {e.line}, Column {e.column}")
-    logger.error(f"  Expected: {e.expected}")
+    # UnexpectedCharacters has 'allowed' not 'expected'
+    if hasattr(e, "allowed") and e.allowed:
+      logger.error(f"  Expected: {', '.join(sorted(e.allowed))}")
     logger.error(f"  Context: {e.get_context(content)}")
 
     if logger.isEnabledFor(logging.DEBUG) and e.line > 0:
@@ -74,7 +76,8 @@ def handle_parse_error(e, content):
   elif isinstance(e, exceptions.UnexpectedToken):
     logger.error("\nParse Error - Unexpected Token:")
     logger.error(f"  Token: {e.token} at line {e.line}, column {e.column}")
-    logger.error(f"  Expected: {e.expected}")
+    if hasattr(e, "expected") and e.expected:
+      logger.error(f"  Expected: {', '.join(sorted(e.expected))}")
 
   else:
     logger.error(f"\nParse Error: {type(e).__name__}: {e}")

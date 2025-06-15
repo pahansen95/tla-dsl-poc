@@ -1,9 +1,9 @@
 // Natural Language Specification DSL - Lark Grammar
-// Optimized for parsing natural language TLA+ specifications
+// Fixed version with proper operation handling
 
 ?start: specification
 
-specification: header definitions state_section operations constraints
+specification: header definitions state_section operations? constraints
 
 // ============ Header Section ============
 header: "System:" WS* system_name NEWLINE description
@@ -39,7 +39,8 @@ state_properties: (INDENT property_line)+
 property_line: text_line NEWLINE
 
 // ============ Operations Section ============
-operations: operation+
+// Made operations optional with ? and changed to operation*
+operations: operation*
 
 operation: NEWLINE "When" WS trigger ":" NEWLINE preconditions INDENT "Then:" NEWLINE effects
 
