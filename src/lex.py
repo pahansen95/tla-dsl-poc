@@ -1,21 +1,36 @@
 #!/usr/bin/env python3
 """
-Lark Grammar Parser with CST Unparsing Support
-Tests Natural Language Specification DSL against documents
-Includes roundtrip validation and unparsing capabilities
+DSL Parser CLI Interface
+
+This module provides the command-line interface for the Natural Language
+Specification DSL parser. It orchestrates the core parsing, unparsing, and
+serialization components to support various document processing workflows.
+
+Responsibilities:
+- Command-line argument handling and validation
+- File I/O operations for grammars and documents
+- Output formatting and display
+- Error reporting and user feedback
+- Orchestration of core modules for different operations
+
+The CLI supports multiple output modes including parse tree display,
+document unparsing, CST serialization, and roundtrip validation. It serves
+as the primary entry point for both interactive use and pipeline integration.
 """
 
-from lark import Lark, Tree, Token, exceptions
 import sys
 import os
 import argparse
 from pathlib import Path
 import logging
-from typing import Union, Optional, Tuple
 import difflib
 
+# Import core functionality
+from core import create_parser, parse_document, unparse_tree, serialize_cst, deserialize_cst
+from lark import Tree, exceptions
 
-# ============ Setup ============
+
+# ============ Environment Setup ============
 def find_project_root() -> Path:
   """Find project root by looking for .git directory."""
   for parent in Path(__file__).parents:
@@ -27,9 +42,6 @@ def find_project_root() -> Path:
 
   print("couldn't find project root, export CONTEXT & try again", file=sys.stderr)
   raise SystemExit(1)
-
-
-CONTEXT = find_project_root()
 
 
 # ============ Logging Configuration ============
@@ -49,7 +61,7 @@ class CompactFormatter(logging.Formatter):
 
 
 def setup_logging(level: int) -> logging.Logger:
-  """Configure minimal logging."""
+  """Configure logging with appropriate level and format."""
   logger = logging.getLogger()
   logger.setLevel(level)
   logger.handlers.clear()
@@ -64,264 +76,194 @@ def setup_logging(level: int) -> logging.Logger:
 logger = logging.getLogger(__name__)
 
 
-# ============ Utility Functions ============
-def load_file(path: Path, file_type: str) -> str:
-  """Load file and log statistics."""
-  logger.info(f"\n[Loading {file_type}: {path}]")
-  with open(path) as f:
-    content = f.read()
+# ============ Display Functions ============
+def print_tree(tree: Tree, indent: int = 0):
+  """Display parse tree structure."""
+  from lark import Token
 
-  stats = f"Read {len(content)} characters"
-  if file_type == "Document":
-    stats = f"Document: {len(content)} chars, {len(content.splitlines())} lines"
-  logger.info(stats)
-
-  return content
-
-
-def log_status(action: str, success: bool = True):
-  """Log action status with consistent formatting."""
-  prefix = "✓" if success else "✗"
-  level = logging.INFO if success else logging.ERROR
-  logger.log(level, f"{prefix} {action}")
-
-
-def create_dsl_parser(grammar: str) -> Lark:
-  """Create parser with standard DSL configuration."""
-  logger.info("\n[Creating Parser]")
-  parser = Lark(
-    grammar,
-    start="specification",
-    parser="earley",
-    debug=logger.isEnabledFor(logging.DEBUG),
-    ambiguity="resolve",
-    keep_all_tokens=True,
-  )
-  log_status("Parser created successfully")
-  return parser
-
-
-# ============ CST Unparsing ============
-class CSTUnparser:
-  """Unparses a Lark CST back to its original text representation."""
-
-  def __init__(self, tree: Tree):
-    self.tree = tree
-
-  def unparse(self) -> str:
-    """Reconstruct the original document from the CST."""
-    return self._unparse_node(self.tree)
-
-  def _unparse_node(self, node: Union[Tree, Token]) -> str:
-    """Recursively unparse a tree node or token."""
-    if isinstance(node, Token):
-      return str(node)
-    elif isinstance(node, Tree):
-      return "".join(self._unparse_node(child) for child in node.children)
-    else:
-      return str(node)
-
-
-def unparse_cst(tree: Tree) -> str:
-  """Convenience function to unparse a CST tree."""
-  return CSTUnparser(tree).unparse()
-
-
-# ============ Validation ============
-def validate_roundtrip(original: str, tree: Tree) -> Tuple[bool, Optional[str]]:
-  """Validate that unparsing produces the exact original text."""
-  unparsed = unparse_cst(tree)
-
-  if original == unparsed:
-    return True, None
-
-  # Generate detailed diff
-  diff_lines = list(
-    difflib.unified_diff(
-      original.splitlines(keepends=True),
-      unparsed.splitlines(keepends=True),
-      fromfile="original",
-      tofile="unparsed",
-      n=3,
-    )
-  )
-
-  diff_text = "".join(diff_lines) if diff_lines else "No line differences, but texts differ"
-  return False, diff_text
-
-
-# ============ Tree Display ============
-def print_tree(tree: Union[Tree, Token], indent: int = 0):
-  """Recursively print parse tree."""
   if isinstance(tree, Tree):
     print("  " * indent + f"[{tree.data}]")
     for child in tree.children:
       print_tree(child, indent + 1)
-  elif logger.isEnabledFor(logging.DEBUG):
+  elif isinstance(tree, Token) and logger.isEnabledFor(logging.DEBUG):
     value = repr(str(tree))
     if len(value) > 50:
-      value = value[:47] + "..." + value[0]
-
-    prefix = f"Token({tree.type}): " if hasattr(tree, "type") else ""
-    print("  " * indent + f"{prefix}{value}")
+      value = value[:47] + "..."
+    print("  " * indent + f"Token: {value}")
 
 
-# ============ Error Handling ============
-def format_parse_error(e: Exception, content: str = "") -> None:
-  """Format and log parse errors consistently."""
+def format_parse_error(e: exceptions.ParseError, content: str) -> None:
+  """Format parse errors with context."""
   if isinstance(e, exceptions.UnexpectedCharacters):
     logger.error("\nParse Error - Unexpected Character:")
     logger.error(f"  Line {e.line}, Column {e.column}")
-    if hasattr(e, "allowed") and e.allowed:
-      logger.error(f"  Expected: {', '.join(sorted(e.allowed))}")
     if content:
       logger.error(f"  Context: {e.get_context(content)}")
-
-    if logger.isEnabledFor(logging.DEBUG) and e.line > 0:
-      lines = content.splitlines()
-      if e.line - 1 < len(lines):
-        logger.debug(f"\n  {lines[e.line - 1]}")
-        logger.debug(f"  {' ' * (e.column - 1)}^")
-
   elif isinstance(e, exceptions.UnexpectedToken):
     logger.error("\nParse Error - Unexpected Token:")
-    logger.error(f"  Token: {e.token} at line {e.line}, column {e.column}")
-    if hasattr(e, "expected") and e.expected:
-      logger.error(f"  Expected: {', '.join(sorted(e.expected))}")
-
+    logger.error(f"  Token: {e.token}")
   else:
-    logger.error(f"\nParse Error: {type(e).__name__}: {e}")
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.exception("Stack trace:")
+    logger.error(f"\nParse Error: {e}")
 
 
-# ============ Output Handlers ============
-def handle_unparse(tree: Tree) -> bool:
-  """Handle unparsing mode."""
-  logger.info("\n[Unparsing CST]")
-  unparsed = unparse_cst(tree)
-  log_status("CST unparsed successfully")
-  logger.info(f"Unparsed document: {len(unparsed)} chars")
-
-  print("\n" + "=" * 50 + " UNPARSED OUTPUT " + "=" * 50)
-  print(unparsed)
-  print("=" * 117)
-  return True
-
-
-def handle_roundtrip(content: str, tree: Tree) -> bool:
-  """Handle roundtrip validation mode."""
-  logger.info("\n[Validating Roundtrip]")
-  success, error = validate_roundtrip(content, tree)
-
-  if success:
-    log_status("Roundtrip validation passed!")
-    logger.info("  Original and unparsed documents are identical")
-  else:
-    logger.error("Roundtrip validation failed!")
-    logger.error(f"  Original length: {len(content)} chars")
-    unparsed = unparse_cst(tree)
-    logger.error(f"  Unparsed length: {len(unparsed)} chars")
-
-    if error and not logger.isEnabledFor(logging.DEBUG):
-      logger.error("\n  Run with --debug to see differences")
-    elif error:
-      logger.debug("\nDifferences:")
-      print(error)
-
-  return success
-
-
-def handle_parse_tree(tree: Tree) -> bool:
-  """Handle default parse tree display."""
-  logger.info("\nParse Tree:")
-  logger.info("-" * 50)
-  print_tree(tree)
-
-  if logger.isEnabledFor(logging.DEBUG):
-    logger.debug(f"\nTotal nodes: {sum(1 for _ in tree.iter_subtrees())}")
-
-  return True
-
-
-# ============ Main Processing ============
-def process_document(grammar_path: Path, document_path: Path, unparse: bool = False, roundtrip: bool = False) -> bool:
-  """Parse document with grammar and optionally unparse or validate roundtrip."""
-  logger.info(f"Grammar File: {grammar_path}")
-  logger.info(f"Test Document: {document_path}")
-  logger.info("=" * 70)
-
-  content = ""
+# ============ Operation Handlers ============
+def handle_parse(grammar_path: Path, document_path: Path) -> bool:
+  """Parse and display tree structure."""
   try:
-    # Load files
-    grammar = load_file(grammar_path, "Grammar")
-    content = load_file(document_path, "Document")
+    grammar = grammar_path.read_text()
+    document = document_path.read_text()
 
-    # Parse
-    parser = create_dsl_parser(grammar)
-    logger.info(f"\n[Parsing Document: {document_path}]")
-    tree = parser.parse(content)
-    log_status("Document parsed successfully!")
+    parser = create_parser(grammar, debug=logger.isEnabledFor(logging.DEBUG))
+    tree = parse_document(parser, document)
 
-    # Handle output modes
-    if unparse:
-      return handle_unparse(tree)
-    elif roundtrip:
-      return handle_roundtrip(content, tree)
-    else:
-      return handle_parse_tree(tree)
+    logger.info("✓ Document parsed successfully")
+    print("\nParse Tree:")
+    print("-" * 50)
+    print_tree(tree)
+    return True
 
-  except FileNotFoundError as e:
-    logger.error(f"File not found: {e.filename}")
+  except exceptions.ParseError as e:
+    format_parse_error(e, document if "document" in locals() else "")
     return False
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
+
+
+def handle_unparse(grammar_path: Path, document_path: Path) -> bool:
+  """Parse and unparse document."""
+  try:
+    grammar = grammar_path.read_text()
+    document = document_path.read_text()
+
+    parser = create_parser(grammar)
+    tree = parse_document(parser, document)
+    unparsed = unparse_tree(tree)
+
+    logger.info("✓ Document unparsed successfully")
+    print(unparsed)
+    return True
 
   except Exception as e:
-    if hasattr(e, "get_context"):
-      format_parse_error(e, content)
-    else:
-      logger.error(f"Grammar error: {e}")
-      if logger.isEnabledFor(logging.DEBUG) and "grammar" in locals():
-        logger.debug("\nGrammar content:")
-        logger.debug("=" * 50)
-        logger.debug(grammar[:500] + "..." if len(grammar) > 500 else grammar)
+    logger.error(f"Error: {e}")
     return False
 
 
-# ============ CLI ============
+def handle_serialize(grammar_path: Path, document_path: Path) -> bool:
+  """Parse and serialize to JSON."""
+  try:
+    grammar = grammar_path.read_text()
+    document = document_path.read_text()
+
+    parser = create_parser(grammar)
+    tree = parse_document(parser, document)
+    json_output = serialize_cst(tree)
+
+    logger.info("✓ CST serialized successfully")
+    print(json_output)
+    return True
+
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
+
+
+def handle_roundtrip(grammar_path: Path, document_path: Path) -> bool:
+  """Validate parse/unparse roundtrip."""
+  try:
+    grammar = grammar_path.read_text()
+    document = document_path.read_text()
+
+    # Test unparsing roundtrip
+    parser = create_parser(grammar)
+    tree = parse_document(parser, document)
+    unparsed = unparse_tree(tree)
+
+    if document != unparsed:
+      logger.error("✗ Roundtrip validation failed")
+      logger.error(f"  Original: {len(document)} chars")
+      logger.error(f"  Unparsed: {len(unparsed)} chars")
+
+      if logger.isEnabledFor(logging.DEBUG):
+        diff = difflib.unified_diff(
+          document.splitlines(keepends=True), unparsed.splitlines(keepends=True), fromfile="original", tofile="unparsed"
+        )
+        print("\nDifferences:")
+        print("".join(diff))
+      return False
+
+    # Test serialization roundtrip
+    json_str = serialize_cst(tree)
+    restored = deserialize_cst(json_str)
+    restored_text = unparse_tree(restored)
+
+    if document != restored_text:
+      logger.error("✗ Serialization roundtrip failed")
+      return False
+
+    logger.info("✓ Roundtrip validation passed")
+    return True
+
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
+
+
+# ============ CLI Interface ============
 def main():
+  """Main entry point for CLI."""
+  root = find_project_root()
+
   parser = argparse.ArgumentParser(
-    description="Parse and unparse Natural Language Specification DSL documents",
+    description="Parse Natural Language Specification DSL documents",
     epilog="Examples:\n"
-    "  %(prog)s                           # Parse with default files\n"
-    "  %(prog)s --unparse                 # Parse and unparse document\n"
-    "  %(prog)s --roundtrip               # Validate parse/unparse roundtrip\n"
-    "  %(prog)s custom.dsl --debug        # Debug custom document",
+    "  %(prog)s                    # Parse default example\n"
+    "  %(prog)s --unparse          # Unparse to stdout\n"
+    "  %(prog)s --serialize        # Output JSON CST\n"
+    "  %(prog)s doc.dsl --debug    # Debug custom document",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
 
-  parser.add_argument("document", type=Path, nargs="?", default=CONTEXT / "spec/example.dsl", help="Document to parse")
-  parser.add_argument("-g", "--grammar", type=Path, default=CONTEXT / "grammar/TLA.lark", help="Lark grammar file")
-  parser.add_argument("-u", "--unparse", action="store_true", help="Unparse the CST back to text")
-  parser.add_argument("-r", "--roundtrip", action="store_true", help="Validate parse/unparse roundtrip")
-  parser.add_argument("-d", "--debug", action="store_true", help="Show debug output")
+  parser.add_argument("document", type=Path, nargs="?", default=root / "spec/example.dsl", help="DSL document to parse")
+  parser.add_argument("-g", "--grammar", type=Path, default=root / "grammar/TLA.lark", help="Lark grammar file")
+
+  # Output modes
+  output = parser.add_mutually_exclusive_group()
+  output.add_argument("-u", "--unparse", action="store_true", help="Unparse the document (text output)")
+  output.add_argument("-s", "--serialize", action="store_true", help="Serialize CST to JSON")
+  output.add_argument("-r", "--roundtrip", action="store_true", help="Validate roundtrip parsing")
+
+  # Options
+  parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
   parser.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
 
   args = parser.parse_args()
 
-  # Set log level
+  # Configure logging
   level = logging.DEBUG if args.debug else logging.WARNING if args.quiet else logging.INFO
   setup_logging(level)
 
-  # Validate files exist
-  for path, name in [(args.grammar, "Grammar"), (args.document, "Document")]:
-    if not path.exists():
-      logger.critical(f"{name} file not found: {path}")
-      sys.exit(1)
+  # Validate files
+  if not args.grammar.exists():
+    logger.critical(f"Grammar file not found: {args.grammar}")
+    return 1
 
-  # Run processing
-  success = process_document(args.grammar, args.document, unparse=args.unparse, roundtrip=args.roundtrip)
-  sys.exit(0 if success else 1)
+  if not args.document.exists():
+    logger.critical(f"Document file not found: {args.document}")
+    return 1
+
+  # Execute requested operation
+  if args.unparse:
+    success = handle_unparse(args.grammar, args.document)
+  elif args.serialize:
+    success = handle_serialize(args.grammar, args.document)
+  elif args.roundtrip:
+    success = handle_roundtrip(args.grammar, args.document)
+  else:
+    success = handle_parse(args.grammar, args.document)
+
+  return 0 if success else 1
 
 
 if __name__ == "__main__":
-  main()
+  sys.exit(main())
