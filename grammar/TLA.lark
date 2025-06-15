@@ -1,19 +1,20 @@
 // Natural Language Specification DSL - CST-oriented Grammar
-// Preserves document structure with flexible indentation
+// Preserves complete document structure including all whitespace
 
 ?start: specification
 
-specification: header definitions state_section operations? constraints
+specification: header definitions state_section operations? constraints NEWLINE*
 
 // ============ Header Section ============
-header: "System:" WS* system_name NEWLINE description
+header: "System:" WS* system_name NEWLINE+ description
 
 system_name: text_line
 
+// Description can be single or multi-line paragraph
 description: text_paragraph
 
 // ============ Definitions Section ============
-definitions: NEWLINE "The" WS "system" WS "uses" WS "these" WS "concepts:" NEWLINE concept_list
+definitions: NEWLINE+ "The" WS "system" WS "uses" WS "these" WS "concepts:" NEWLINE concept_list
 
 concept_list: concept_def+
 
@@ -24,9 +25,10 @@ concept_name: identifier (WS identifier)*
 concept_description: text_line
 
 // ============ State Section ============
-state_section: NEWLINE "The" WS "system" WS "maintains:" NEWLINE NEWLINE state_list
+state_section: NEWLINE+ "The" WS "system" WS "maintains:" NEWLINE+ state_list
 
-state_list: state_block+
+// Allow optional newlines between state blocks
+state_list: (state_block NEWLINE*)+
 
 state_block: state_header state_properties
 
@@ -41,13 +43,13 @@ property_line: text_line NEWLINE
 // ============ Operations Section ============
 operations: operation*
 
-operation: NEWLINE "When" WS trigger ":" NEWLINE operation_body
+operation: NEWLINE+ "When" WS trigger ":" NEWLINE operation_body
 
 operation_body: preconditions transition_marker effects
 
 trigger: text_line
 
-// Allow preconditions with base indentation
+// Preconditions with base indentation
 preconditions: (INDENT precondition_line)*
 
 precondition_line: text_line NEWLINE
@@ -55,35 +57,38 @@ precondition_line: text_line NEWLINE
 // Transition marker at same indentation as preconditions
 transition_marker: INDENT "Then:" NEWLINE
 
-// Effects with nested indentation (4 spaces)
+// Effects with nested indentation
 effects: effect+
 
-effect: DOUBLE_INDENT "-" WS* effect_line
+effect: DOUBLE_INDENT "-" WS* effect_content
 
-effect_line: text_line NEWLINE
+// Effect content can span multiple lines with continued indentation
+effect_content: text_line NEWLINE (DOUBLE_INDENT WS* text_line NEWLINE)*
 
 // ============ Constraints Section ============
-constraints: NEWLINE "System" WS "Constraints:" NEWLINE NEWLINE constraint_list guarantees?
+constraints: NEWLINE+ "System" WS "Constraints:" NEWLINE+ constraint_list guarantees?
 
-guarantees: NEWLINE "System" WS "Guarantees:" NEWLINE NEWLINE guarantee_list
+guarantees: NEWLINE+ "System" WS "Guarantees:" NEWLINE+ guarantee_list
 
-constraint_list: constraint_item+
+constraint_list: (constraint_item NEWLINE*)+
 
-guarantee_list: guarantee_item+
+guarantee_list: (guarantee_item NEWLINE*)+
 
 constraint_item: named_property
 guarantee_item: named_property
 
-named_property: property_name ":" NEWLINE INDENT property_value NEWLINE?
+named_property: property_name ":" NEWLINE INDENT property_content
 
 property_name: identifier (WS identifier)*
 
-property_value: text_line
+// Property content can be multi-line with consistent indentation
+property_content: text_line (NEWLINE INDENT text_line)*
 
 // ============ Text Components ============
 text_line: (WORD | NUMBER | SYMBOL | WS)+
 
-text_paragraph: (text_line NEWLINE)+
+// Paragraph structure for descriptions - handles single or multi-line
+text_paragraph: text_line (NEWLINE text_line)* NEWLINE?
 
 identifier: WORD
 
@@ -92,10 +97,10 @@ WORD: /[a-zA-Z][a-zA-Z0-9_]*/
 NUMBER: /[0-9]+/
 SYMBOL: /[.,;:!?\-_()\/'"@#$%&*+=\[\]{}|\\<>~`^]/
 
-// Whitespace - preserve exact indentation for CST
+// Whitespace - preserve exact formatting
 WS: /[ \t]+/
 INDENT: /  /           // Exactly 2 spaces
 DOUBLE_INDENT: /    /  // Exactly 4 spaces
 NEWLINE: /\r?\n/
 
-// Don't ignore any whitespace - we want it in the CST
+// Don't ignore any whitespace - preserve everything in CST
