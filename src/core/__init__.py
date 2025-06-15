@@ -1,47 +1,40 @@
 #!/usr/bin/env python3
 """
-Core DSL Processing Package
+Core DSL Processing Package - Refactored
 
-This package provides the fundamental components for parsing, transforming,
-and unparsing Natural Language Specification DSL documents. It maintains a
-clean separation of concerns with each module handling a specific aspect of
-the document processing pipeline.
+This refactored version simplifies the package interface by:
+- Removing redundant function imports (parse_with_grammar, validate_grammar)
+- Streamlining the public API to essential functions only
+- Maintaining clean separation between modules
+- Reducing boilerplate with direct imports
 
-Modules:
-- parser: Convert DSL text to Concrete Syntax Trees
-- unparser: Convert CST back to DSL text
-- syntax: Serialize/deserialize CST for pipeline processing
-
-The package design enables flexible composition of these components for
-various workflows including validation, transformation, and analysis.
+The package provides fundamental components for parsing, transforming,
+and unparsing Natural Language Specification DSL documents.
 """
 
-# Import key functions for convenient access
-from .parser import create_parser, parse_document, parse_with_grammar, validate_grammar
+# Parser functions - core parsing operations
+from .parser import create_parser, parse_document
 
-from .unparser import unparse_tree, unparse_subtree, extract_tokens, unparse_without_whitespace
+# Unparser functions - text reconstruction
+from .unparser import unparse_tree, extract_tokens
 
-from .syntax import serialize_cst, deserialize_cst, to_dict, from_dict, roundtrip_test
+# Serialization functions - CST pipeline support
+from .syntax import serialize_cst, deserialize_cst, to_dict, from_dict
 
 # Module version
 __version__ = "0.1.0"
 
-# Public API
+# Simplified public API - only essential functions
 __all__ = [
-  # Parser functions
+  # Parser
   "create_parser",
   "parse_document",
-  "parse_with_grammar",
-  "validate_grammar",
-  # Unparser functions
+  # Unparser
   "unparse_tree",
-  "unparse_subtree",
   "extract_tokens",
-  "unparse_without_whitespace",
-  # Serialization functions
+  # Serialization
   "serialize_cst",
   "deserialize_cst",
   "to_dict",
   "from_dict",
-  "roundtrip_test",
 ]
