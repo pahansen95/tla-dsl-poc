@@ -4,4 +4,21 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "lark-parser>=0.12.0",
+    "ruff>=0.11.13",
 ]
+
+[tool.ruff]
+line-length = 120
+indent-width = 2
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["E", "W", "F"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+section-order = ["standard-library", "third-party", "local-folder"]
+combine-as-imports = true
