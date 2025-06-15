@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """
-DSL Parser CLI Interface - Refactored
+DSL Parser CLI Interface - With AST Integration
 
-This refactored version eliminates significant code duplication through:
-- ParseContext class for common parsing operations
-- Error handling decorator for consistent exception management
-- Routing table pattern for command dispatch
-- Unified diff display function
-
-Code reduction: ~450 lines → ~260 lines (42% reduction)
+This version includes AST functionality for semantic analysis and
+transformation of DSL documents. New operations include AST building,
+serialization, and reformatting through AST transformation.
 """
 
 import sys
@@ -19,10 +15,14 @@ import logging
 from typing import Callable
 import difflib
 
-# Import core functionality from refactored modules
+# Import core functionality
 from core.parser import create_parser, parse_document
 from core.unparser import unparse_tree
 from core.syntax import serialize_cst, deserialize_cst
+
+# Import AST functionality
+from core.ast import build_ast, format_ast, serialize_ast, Specification
+
 from lark import Tree, Token, exceptions
 
 
@@ -123,6 +123,37 @@ def print_tree(tree: Tree, indent: int = 0):
     print("  " * indent + f"Token: {value}")
 
 
+def print_ast(ast: Specification, indent: int = 0):
+  """Display AST structure in readable format."""
+
+  def print_node(node, level):
+    indent_str = "  " * level
+    if isinstance(node, list):
+      for item in node:
+        print_node(item, level)
+    elif hasattr(node, "__dict__"):
+      # Print node type
+      print(f"{indent_str}{node.__class__.__name__}:")
+      # Print attributes
+      for key, value in node.__dict__.items():
+        if key.startswith("_") or key == "source_location":
+          continue
+        if isinstance(value, list) and value:
+          print(f"{indent_str}  {key}:")
+          for item in value:
+            if hasattr(item, "__class__"):
+              print_node(item, level + 2)
+            else:
+              print(f"{indent_str}    - {item}")
+        elif hasattr(value, "__dict__"):
+          print(f"{indent_str}  {key}:")
+          print_node(value, level + 2)
+        elif value:
+          print(f"{indent_str}  {key}: {value}")
+
+  print_node(ast, indent)
+
+
 def find_project_root() -> Path:
   """Find project root by looking for .git directory or using CONTEXT env var."""
   for parent in Path(__file__).parents:
@@ -219,6 +250,69 @@ def handle_validate_against(ctx: ParseContext, comparison_path: Path) -> bool:
     return False
 
 
+# ============ AST Operation Handlers ============
+@with_error_handling("ast")
+def handle_ast(ctx: ParseContext) -> bool:
+  """Build and display AST structure."""
+  ctx.execute()
+  ast = build_ast(ctx.tree)
+  logger.info("✓ AST built successfully")
+  print("\nAbstract Syntax Tree:")
+  print("-" * 50)
+  print_ast(ast)
+  return True
+
+
+@with_error_handling("serialize-ast")
+def handle_serialize_ast(ctx: ParseContext) -> bool:
+  """Build AST and serialize to JSON."""
+  ctx.execute()
+  ast = build_ast(ctx.tree)
+  json_output = serialize_ast(ast)
+  logger.info("✓ AST serialized successfully")
+  print(json_output)
+  return True
+
+
+@with_error_handling("reformat")
+def handle_reformat(ctx: ParseContext) -> bool:
+  """Reformat document through AST transformation."""
+  ctx.execute()
+  ast = build_ast(ctx.tree)
+  reformatted_cst = format_ast(ast)
+  reformatted_text = unparse_tree(reformatted_cst)
+  logger.info("✓ Document reformatted through AST")
+  print(reformatted_text)
+  return True
+
+
+@with_error_handling("ast-roundtrip")
+def handle_ast_roundtrip(ctx: ParseContext) -> bool:
+  """Validate CST → AST → CST roundtrip."""
+  ctx.execute()
+
+  # Build AST from CST
+  ast = build_ast(ctx.tree)
+
+  # Format AST back to CST
+  formatted_cst = format_ast(ast)
+  formatted_text = unparse_tree(formatted_cst)
+
+  # Parse the formatted text to get normalized CST
+  formatted_tree = parse_document(ctx.parser, formatted_text)
+
+  # Build AST from formatted CST
+  ast2 = build_ast(formatted_tree)
+
+  # Compare AST representations
+  if repr(ast) != repr(ast2):
+    logger.error("✗ AST roundtrip failed - semantic difference")
+    return False
+
+  logger.info("✓ AST roundtrip validation passed")
+  return True
+
+
 # ============ Logging Setup ============
 class CompactFormatter(logging.Formatter):
   """Compact log formatter with level-specific prefixes."""
@@ -263,6 +357,8 @@ def main():
     "  %(prog)s                    # Parse default example\n"
     "  %(prog)s --unparse          # Unparse to stdout\n"
     "  %(prog)s --serialize        # Output JSON CST\n"
+    "  %(prog)s --ast              # Display AST structure\n"
+    "  %(prog)s --reformat         # Reformat via AST\n"
     "  %(prog)s doc.dsl --debug    # Debug custom document\n"
     "  %(prog)s a.dsl -v b.dsl     # Validate unparsed a.dsl equals b.dsl",
     formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -275,10 +371,16 @@ def main():
   output = parser.add_mutually_exclusive_group()
   output.add_argument("-u", "--unparse", action="store_true", help="Unparse the document (text output)")
   output.add_argument("-s", "--serialize", action="store_true", help="Serialize CST to JSON")
-  output.add_argument("-r", "--roundtrip", action="store_true", help="Validate roundtrip parsing")
+  output.add_argument("-r", "--roundtrip", action="store_true", help="Validate CST roundtrip parsing")
   output.add_argument(
     "-v", "--validate-against", type=Path, metavar="FILE", help="Validate unparsed CST against another document"
   )
+
+  # AST operations
+  output.add_argument("-a", "--ast", action="store_true", help="Build and display AST structure")
+  output.add_argument("--serialize-ast", action="store_true", help="Serialize AST to JSON")
+  output.add_argument("--reformat", action="store_true", help="Reformat document via AST transformation")
+  output.add_argument("--ast-roundtrip", action="store_true", help="Validate AST roundtrip transformation")
 
   # Options
   parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
@@ -311,6 +413,14 @@ def main():
       logger.critical(f"Comparison file not found: {args.validate_against}")
       return 1
     success = handle_validate_against(ctx, args.validate_against)
+  elif args.ast:
+    success = handle_ast(ctx)
+  elif args.serialize_ast:
+    success = handle_serialize_ast(ctx)
+  elif args.reformat:
+    success = handle_reformat(ctx)
+  elif args.ast_roundtrip:
+    success = handle_ast_roundtrip(ctx)
   else:
     success = handle_parse(ctx)
 
