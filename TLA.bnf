@@ -1,0 +1,82 @@
+/* Natural Language Specification DSL - BNF Grammar v3.0 */
+/* Simplified for practical text parsing */
+
+<specification> ::= <header> <definitions> <state_section> <operations> <constraints>
+
+/* Header Section */
+<header> ::= "System:" <ws>* <system_name> "\n" <description>
+
+<system_name> ::= <any_text_line>
+
+<description> ::= <text_block>
+
+/* Definitions Section */
+<definitions> ::= "\n" "The" <ws> "system" <ws> "uses" <ws> "these" <ws> "concepts:" "\n" <concept_list>
+
+<concept_list> ::= ( "-" <ws>* <concept_def> "\n" )+
+
+<concept_def> ::= <identifier> ( <ws> <identifier> )* ":" <ws>* <concept_type>
+
+<concept_type> ::= <any_text_line>
+
+/* State Section */
+<state_section> ::= "\n" "The" <ws> "system" <ws> "maintains:" "\n" "\n" <state_list>
+
+<state_list> ::= ( <state_block> "\n" )+
+
+<state_block> ::= <state_name> ":" "\n" <state_properties>
+
+<state_name> ::= <identifier> ( <ws> <identifier> )*
+
+<state_properties> ::= ( <ws> <ws> <property_line> "\n" )+
+
+<property_line> ::= <any_text_line>
+
+/* Operations Section */
+<operations> ::= ( "\n" <operation> )+
+
+<operation> ::= "When" <ws> <trigger_text> ":" "\n" 
+                <preconditions>
+                <ws> <ws> "Then:" "\n"
+                <effects>
+
+<trigger_text> ::= <any_text_line>
+
+<preconditions> ::= ( <ws> <ws> <precondition_line> "\n" )*
+
+<precondition_line> ::= <any_text_line>
+
+<effects> ::= ( <ws> <ws> "-" <ws>* <effect_text> "\n" )+
+
+<effect_text> ::= <any_text_line>
+
+/* Constraints Section */
+<constraints> ::= "\n" "System" <ws> "Constraints:" "\n" "\n" <constraint_list>
+                  ( "\n" "System" <ws> "Guarantees:" "\n" "\n" <guarantee_list> )?
+
+<constraint_list> ::= ( <named_item> "\n" )+
+
+<guarantee_list> ::= ( <named_item> "\n" )+
+
+<named_item> ::= <item_name> ":" "\n" <ws> <ws> <item_text>
+
+<item_name> ::= <identifier> ( <ws> <identifier> )*
+
+<item_text> ::= <any_text_line>
+
+/* Basic Text Elements */
+<any_text_line> ::= ( <char> )*
+
+<text_block> ::= ( <any_text_line> "\n" )+
+
+<char> ::= <letter> | <digit> | <ws> | <punct>
+
+<letter> ::= [a-z] | [A-Z]
+
+<digit> ::= [0-9]
+
+<ws> ::= " " | "\t"
+
+<punct> ::= "." | "," | ";" | ":" | "!" | "?" | "-" | "_" | "(" | ")" | "/" | "'" | "@" | "#" | "$" | "%" | "&" | "*" | "+" | "=" | "[" | "]" | "{" | "}" | "|" | "\\" | "<" | ">" | "~" | "`" | "^"
+
+<identifier> ::= <letter> ( <letter> | <digit> | "_" )*
