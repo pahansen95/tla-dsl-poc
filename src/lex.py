@@ -1,16 +1,30 @@
 #!/usr/bin/env python3
 """
-Lark Grammar Test Parser - Minimal Version
+Lark Grammar Parser with CST Unparsing Support
 Tests Natural Language Specification DSL against documents
+Includes roundtrip validation and unparsing capabilities
 """
 
-from lark import Lark, Tree, exceptions
+from lark import Lark, Tree, Token, exceptions
 import sys
+import os
 import argparse
 from pathlib import Path
 import logging
+from typing import Union, Optional
 
-CONTEXT = Path(__file__).parent
+for parent in Path(__file__).parents:
+  if (parent / ".git").exists():
+    CONTEXT = parent
+    break
+else:
+  CONTEXT = os.environ.get("CONTEXT", None)
+  if CONTEXT is None:
+    print("couldn't find project root, export CONTEXT & try again", file=sys.stderr)
+    sys.stderr.flush()
+    raise SystemExit(1)
+
+assert isinstance(CONTEXT, Path)
 
 
 # Configure logging
@@ -45,6 +59,63 @@ def setup_logging(level):
 logger = logging.getLogger(__name__)
 
 
+# ============ CST Unparsing ============
+class CSTUnparser:
+  """Unparses a Lark CST back to its original text representation."""
+
+  def __init__(self, tree: Tree):
+    """Initialize with a parsed CST."""
+    self.tree = tree
+
+  def unparse(self) -> str:
+    """Reconstruct the original document from the CST."""
+    return self._unparse_node(self.tree)
+
+  def _unparse_node(self, node: Union[Tree, Token]) -> str:
+    """Recursively unparse a tree node or token."""
+    if isinstance(node, Token):
+      return str(node)
+    elif isinstance(node, Tree):
+      return "".join(self._unparse_node(child) for child in node.children)
+    else:
+      return str(node)
+
+
+def unparse_cst(tree: Tree) -> str:
+  """Convenience function to unparse a CST tree."""
+  return CSTUnparser(tree).unparse()
+
+
+def validate_roundtrip(original: str, tree: Tree) -> tuple[bool, Optional[str]]:
+  """
+  Validate that unparsing produces the exact original text.
+
+  Returns:
+    (success, error_message): success is True if roundtrip succeeds
+  """
+  unparsed = unparse_cst(tree)
+
+  if original == unparsed:
+    return True, None
+
+  # Generate detailed diff
+  import difflib
+
+  diff_lines = list(
+    difflib.unified_diff(
+      original.splitlines(keepends=True),
+      unparsed.splitlines(keepends=True),
+      fromfile="original",
+      tofile="unparsed",
+      n=3,
+    )
+  )
+
+  diff_text = "".join(diff_lines) if diff_lines else "No line differences, but texts differ"
+  return False, diff_text
+
+
+# ============ Tree Printing ============
 def print_tree(tree, indent=0):
   """Recursively print parse tree."""
   if isinstance(tree, Tree):
@@ -52,14 +123,12 @@ def print_tree(tree, indent=0):
     for child in tree.children:
       print_tree(child, indent + 1)
   elif logger.isEnabledFor(logging.DEBUG):
-    # Use repr() to properly escape special characters
     value = repr(str(tree))
-    # Truncate long values but keep them as valid repr strings
     if len(value) > 50:
-      value = value[:47] + '...' + value[0]  # Keep closing quote
-    
+      value = value[:47] + "..." + value[0]
+
     prefix = f"Token({tree.type}): " if hasattr(tree, "type") else ""
-    print("  " * indent + f'{prefix}{value}')
+    print("  " * indent + f"{prefix}{value}")
 
 
 def handle_parse_error(e, content):
@@ -67,7 +136,6 @@ def handle_parse_error(e, content):
   if isinstance(e, exceptions.UnexpectedCharacters):
     logger.error("\nParse Error - Unexpected Character:")
     logger.error(f"  Line {e.line}, Column {e.column}")
-    # UnexpectedCharacters has 'allowed' not 'expected'
     if hasattr(e, "allowed") and e.allowed:
       logger.error(f"  Expected: {', '.join(sorted(e.allowed))}")
     logger.error(f"  Context: {e.get_context(content)}")
@@ -90,8 +158,9 @@ def handle_parse_error(e, content):
       logger.exception("Stack trace:")
 
 
-def validate_grammar(grammar_path, document_path):
-  """Parse document with grammar and report results."""
+# ============ Main Processing ============
+def process_document(grammar_path, document_path, unparse=False, roundtrip=False):
+  """Parse document with grammar and optionally unparse or validate roundtrip."""
   logger.info(f"Grammar File: {grammar_path}")
   logger.info(f"Test Document: {document_path}")
   logger.info("=" * 70)
@@ -122,15 +191,48 @@ def validate_grammar(grammar_path, document_path):
     logger.info(f"Document: {len(content)} chars, {len(content.splitlines())} lines")
 
     tree = parser.parse(content)
-
-    # Success
     logger.info("\n✓ Document parsed successfully!")
-    logger.info("\nParse Tree:")
-    logger.info("-" * 50)
-    print_tree(tree)
 
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.debug(f"\nTotal nodes: {sum(1 for _ in tree.iter_subtrees())}")
+    # Show parse tree
+    if not unparse and not roundtrip:
+      logger.info("\nParse Tree:")
+      logger.info("-" * 50)
+      print_tree(tree)
+
+      if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"\nTotal nodes: {sum(1 for _ in tree.iter_subtrees())}")
+
+    # Unparse mode
+    if unparse:
+      logger.info("\n[Unparsing CST]")
+      unparsed = unparse_cst(tree)
+      logger.info("✓ CST unparsed successfully")
+      logger.info(f"Unparsed document: {len(unparsed)} chars")
+      print("\n" + "=" * 50 + " UNPARSED OUTPUT " + "=" * 50)
+      print(unparsed)
+      print("=" * 117)
+
+    # Roundtrip validation
+    if roundtrip:
+      logger.info("\n[Validating Roundtrip]")
+      success, error = validate_roundtrip(content, tree)
+
+      if success:
+        logger.info("✓ Roundtrip validation passed!")
+        logger.info("  Original and unparsed documents are identical")
+      else:
+        logger.error("Roundtrip validation failed!")
+        logger.error(f"  Original length: {len(content)} chars")
+        unparsed = unparse_cst(tree)
+        logger.error(f"  Unparsed length: {len(unparsed)} chars")
+
+        if error and not logger.isEnabledFor(logging.DEBUG):
+          logger.error("\n  Run with --debug to see differences")
+        elif error:
+          logger.debug("\nDifferences:")
+          print(error)
+
+        return False
 
     return True
 
@@ -139,9 +241,9 @@ def validate_grammar(grammar_path, document_path):
     return False
 
   except Exception as e:
-    if hasattr(e, "get_context"):  # Parse error
+    if hasattr(e, "get_context"):
       handle_parse_error(e, content if "content" in locals() else "")
-    else:  # Grammar error
+    else:
       logger.error(f"Grammar error: {e}")
       if logger.isEnabledFor(logging.DEBUG) and "grammar" in locals():
         logger.debug("\nGrammar content:")
@@ -152,16 +254,19 @@ def validate_grammar(grammar_path, document_path):
 
 def main():
   parser = argparse.ArgumentParser(
-    description="Test Lark grammar against specification documents",
+    description="Parse and unparse Natural Language Specification DSL documents",
     epilog="Examples:\n"
-    "  %(prog)s                    # Use defaults\n"
-    "  %(prog)s --debug            # Show debug output\n"
-    "  %(prog)s custom.lark spec.tla",
+    "  %(prog)s                           # Parse with default files\n"
+    "  %(prog)s --unparse                 # Parse and unparse document\n"
+    "  %(prog)s --roundtrip               # Validate parse/unparse roundtrip\n"
+    "  %(prog)s custom.dsl --debug        # Debug custom document",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
 
   parser.add_argument("document", type=Path, nargs="?", default=CONTEXT / "spec/example.dsl", help="Document to parse")
   parser.add_argument("-g", "--grammar", type=Path, default=CONTEXT / "grammar/TLA.lark", help="Lark grammar file")
+  parser.add_argument("-u", "--unparse", action="store_true", help="Unparse the CST back to text")
+  parser.add_argument("-r", "--roundtrip", action="store_true", help="Validate parse/unparse roundtrip")
   parser.add_argument("-d", "--debug", action="store_true", help="Show debug output")
   parser.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
 
@@ -177,8 +282,9 @@ def main():
       logger.critical(f"{name} file not found: {path}")
       sys.exit(1)
 
-  # Run validation
-  sys.exit(0 if validate_grammar(args.grammar, args.document) else 1)
+  # Run processing
+  success = process_document(args.grammar, args.document, unparse=args.unparse, roundtrip=args.roundtrip)
+  sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":
