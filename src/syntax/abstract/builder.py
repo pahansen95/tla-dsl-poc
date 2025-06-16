@@ -8,7 +8,7 @@ Transforms Concrete Syntax Trees into Abstract Syntax Trees.
 from typing import List, Optional
 from lark import Tree
 
-from cst import find_child, find_all
+from syntax.concrete import find_child, find_all
 from common import extract_text
 from .nodes import Specification, Concept, StateDeclaration, Operation, Property
 

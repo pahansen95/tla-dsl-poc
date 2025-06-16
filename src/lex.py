@@ -12,10 +12,11 @@ import argparse
 from pathlib import Path
 import logging
 import difflib
+import contextlib
 
-# Import from new package structure
-from cst import parse_document, unparse_tree
-from ast import build_ast, format_ast, Specification
+# Import from reorganized package structure
+from syntax.concrete import parse_document, unparse_tree
+from syntax.abstract import build_ast, format_ast, Specification
 from serialization import serialize_to_json, deserialize_from_json, build_ast_registry
 
 from lark import exceptions
@@ -381,5 +382,20 @@ def main():
   return 0 if success else 1
 
 
+@contextlib.contextmanager
+def cli_session(*args):
+  rc = 0
+  try: yield
+  except SystemExit as e:
+    rc = e.code
+  except Exception:
+    logger.critical('Unhandled Exception', exc_info=True)
+    rc = 1
+  finally:
+    logging.shutdown()
+    sys.stdout.flush()
+  sys.exit(rc)
+
 if __name__ == "__main__":
-  sys.exit(main())
+  with cli_session():
+    main()
