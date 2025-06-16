@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-DSL Parser CLI Interface - With AST Integration
+DSL Parser CLI Interface
 
-This version includes AST functionality for semantic analysis and
-transformation of DSL documents. New operations include AST building,
-serialization, and reformatting through AST transformation.
+Command-line interface for parsing, transforming, and analyzing
+Natural Language Specification DSL documents.
 """
 
 import sys
@@ -12,106 +11,45 @@ import os
 import argparse
 from pathlib import Path
 import logging
-from typing import Callable
 import difflib
 
-# Import core functionality
-from core.parser import create_parser, parse_document
-from core.unparser import unparse_tree
-from core.syntax import serialize_cst, deserialize_cst
+# Import from new package structure
+from cst import parse_document, unparse_tree
+from ast import build_ast, format_ast, Specification
+from serialization import serialize_to_json, deserialize_from_json, build_ast_registry
 
-# Import AST functionality
-from core.ast import build_ast, format_ast, serialize_ast, Specification
-
-from lark import Tree, Token, exceptions
+from lark import exceptions
 
 
-# ============ Common Infrastructure ============
+# Parse Context Management
 class ParseContext:
-  """
-  Encapsulates common parsing operations and state management.
-
-  This class eliminates duplicate file loading, parser creation,
-  and document parsing code that was repeated across all handler functions.
-  """
+  """Encapsulates parsing state and operations."""
 
   def __init__(self, grammar_path: Path, document_path: Path, debug: bool = False):
     self.grammar_path = grammar_path
     self.document_path = document_path
+    self.debug = debug
     self.grammar = None
     self.document = None
-    self.parser = None
     self.tree = None
-    self.debug = debug
 
-  def load_files(self):
+  def load(self):
     """Load grammar and document files."""
     self.grammar = self.grammar_path.read_text()
     self.document = self.document_path.read_text()
     return self
 
-  def create_parser(self):
-    """Create parser from loaded grammar."""
-    self.parser = create_parser(self.grammar, debug=self.debug)
-    return self
-
   def parse(self):
-    """Parse document with created parser."""
-    self.tree = parse_document(self.parser, self.document)
+    """Parse document using loaded grammar."""
+    self.tree = parse_document(self.grammar, self.document, debug=self.debug)
     return self
 
-  def execute(self):
-    """Execute full parsing pipeline with method chaining."""
-    return self.load_files().create_parser().parse()
 
+# Output Utilities
+def print_tree(tree, indent=0):
+  """Display parse tree structure."""
+  from lark import Tree, Token
 
-def with_error_handling(operation_name: str):
-  """
-  Decorator for consistent error handling across all operations.
-
-  Eliminates duplicate try/except blocks and provides uniform error
-  formatting for parse errors and general exceptions.
-  """
-
-  def decorator(func: Callable) -> Callable:
-    def wrapper(*args, **kwargs) -> bool:
-      try:
-        return func(*args, **kwargs)
-      except exceptions.ParseError as e:
-        # Format parse error with context
-        logger.error(f"\nParse Error in {operation_name}:")
-        if hasattr(e, "line"):
-          logger.error(f"  Line {e.line}, Column {getattr(e, 'column', '?')}")
-
-        # Try to get context from ParseContext if available
-        if args and isinstance(args[0], ParseContext) and hasattr(e, "get_context"):
-          ctx = args[0]
-          if ctx.document:
-            logger.error(f"  Context: {e.get_context(ctx.document)}")
-
-        logger.error(f"  {e}")
-        return False
-      except Exception as e:
-        logger.error(f"Error in {operation_name}: {e}")
-        return False
-
-    return wrapper
-
-  return decorator
-
-
-# ============ Utility Functions ============
-def show_diff(text1: str, text2: str, label1: str, label2: str):
-  """Display unified diff between two texts."""
-  diff = difflib.unified_diff(
-    text1.splitlines(keepends=True), text2.splitlines(keepends=True), fromfile=label1, tofile=label2
-  )
-  print("\nDifferences:")
-  print("".join(diff))
-
-
-def print_tree(tree: Tree, indent: int = 0):
-  """Display parse tree structure with optional token details."""
   if isinstance(tree, Tree):
     print("  " * indent + f"[{tree.data}]")
     for child in tree.children:
@@ -123,214 +61,227 @@ def print_tree(tree: Tree, indent: int = 0):
     print("  " * indent + f"Token: {value}")
 
 
-def print_ast(ast: Specification, indent: int = 0):
-  """Display AST structure in readable format."""
+def print_ast(ast: Specification, indent=0):
+  """Display AST structure."""
+  print(f"{'  ' * indent}Specification: {ast.name}")
+  print(f"{'  ' * (indent + 1)}Description: {ast.description}")
 
-  def print_node(node, level):
-    indent_str = "  " * level
-    if isinstance(node, list):
-      for item in node:
-        print_node(item, level)
-    elif hasattr(node, "__dict__"):
-      # Print node type
-      print(f"{indent_str}{node.__class__.__name__}:")
-      # Print attributes
-      for key, value in node.__dict__.items():
-        if key.startswith("_") or key == "source_location":
-          continue
-        if isinstance(value, list) and value:
-          print(f"{indent_str}  {key}:")
-          for item in value:
-            if hasattr(item, "__class__"):
-              print_node(item, level + 2)
-            else:
-              print(f"{indent_str}    - {item}")
-        elif hasattr(value, "__dict__"):
-          print(f"{indent_str}  {key}:")
-          print_node(value, level + 2)
-        elif value:
-          print(f"{indent_str}  {key}: {value}")
+  if ast.concepts:
+    print(f"{'  ' * (indent + 1)}Concepts:")
+    for c in ast.concepts:
+      print(f"{'  ' * (indent + 2)}- {c.name}: {c.description}")
 
-  print_node(ast, indent)
+  if ast.states:
+    print(f"{'  ' * (indent + 1)}States:")
+    for s in ast.states:
+      print(f"{'  ' * (indent + 2)}- {s.name}")
+      for p in s.properties:
+        print(f"{'  ' * (indent + 3)}  {p}")
+      if s.initial_condition:
+        print(f"{'  ' * (indent + 3)}  {s.initial_condition}")
 
+  if ast.operations:
+    print(f"{'  ' * (indent + 1)}Operations:")
+    for o in ast.operations:
+      print(f"{'  ' * (indent + 2)}- When {o.trigger}")
 
-def find_project_root() -> Path:
-  """Find project root by looking for .git directory or using CONTEXT env var."""
-  for parent in Path(__file__).parents:
-    if (parent / ".git").exists():
-      return parent
+  if ast.properties:
+    constraints = [p for p in ast.properties if p.property_type == "constraint"]
+    guarantees = [p for p in ast.properties if p.property_type == "guarantee"]
 
-  if context := os.environ.get("CONTEXT"):
-    return Path(context)
+    if constraints:
+      print(f"{'  ' * (indent + 1)}Constraints:")
+      for c in constraints:
+        print(f"{'  ' * (indent + 2)}- {c.name}")
 
-  print("couldn't find project root, export CONTEXT & try again", file=sys.stderr)
-  raise SystemExit(1)
+    if guarantees:
+      print(f"{'  ' * (indent + 1)}Guarantees:")
+      for g in guarantees:
+        print(f"{'  ' * (indent + 2)}- {g.name}")
 
 
-# ============ Operation Handlers ============
-@with_error_handling("parse")
+def show_diff(text1: str, text2: str, label1: str, label2: str):
+  """Display unified diff between texts."""
+  diff = difflib.unified_diff(
+    text1.splitlines(keepends=True), text2.splitlines(keepends=True), fromfile=label1, tofile=label2
+  )
+  print("\nDifferences:")
+  print("".join(diff))
+
+
+# Operation Handlers
 def handle_parse(ctx: ParseContext) -> bool:
   """Parse and display tree structure."""
-  ctx.execute()
-  logger.info("✓ Document parsed successfully")
-  print("\nParse Tree:")
-  print("-" * 50)
-  print_tree(ctx.tree)
-  return True
+  try:
+    ctx.load().parse()
+    logger.info("✓ Document parsed successfully")
+    print("\nParse Tree:")
+    print("-" * 50)
+    print_tree(ctx.tree)
+    return True
+  except exceptions.ParseError as e:
+    logger.error(f"Parse Error: {e}")
+    return False
 
 
-@with_error_handling("unparse")
 def handle_unparse(ctx: ParseContext) -> bool:
-  """Parse and unparse document."""
-  ctx.execute()
-  unparsed = unparse_tree(ctx.tree)
-  logger.info("✓ Document unparsed successfully")
-  print(unparsed)
-  return True
+  """Parse and reconstruct document text."""
+  try:
+    ctx.load().parse()
+    unparsed = unparse_tree(ctx.tree)
+    logger.info("✓ Document unparsed successfully")
+    print(unparsed)
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
 
 
-@with_error_handling("serialize")
 def handle_serialize(ctx: ParseContext) -> bool:
-  """Parse and serialize to JSON."""
-  ctx.execute()
-  json_output = serialize_cst(ctx.tree)
-  logger.info("✓ CST serialized successfully")
-  print(json_output)
-  return True
+  """Serialize CST to JSON."""
+  try:
+    ctx.load().parse()
+    json_output = serialize_to_json(ctx.tree)
+    logger.info("✓ CST serialized successfully")
+    print(json_output)
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
 
 
-@with_error_handling("roundtrip")
 def handle_roundtrip(ctx: ParseContext) -> bool:
   """Validate parse/unparse roundtrip."""
-  ctx.execute()
+  try:
+    ctx.load().parse()
 
-  # Test unparsing roundtrip
-  unparsed = unparse_tree(ctx.tree)
-  if ctx.document != unparsed:
-    logger.error("✗ Unparsing roundtrip failed")
-    logger.error(f"  Original: {len(ctx.document)} chars")
-    logger.error(f"  Unparsed: {len(unparsed)} chars")
+    # Test unparsing
+    unparsed = unparse_tree(ctx.tree)
+    if ctx.document != unparsed:
+      logger.error("✗ Unparsing roundtrip failed")
+      if logger.isEnabledFor(logging.DEBUG):
+        show_diff(ctx.document, unparsed, "original", "unparsed")
+      return False
 
-    if logger.isEnabledFor(logging.DEBUG):
-      show_diff(ctx.document, unparsed, "original", "unparsed")
-    return False
+    # Test serialization
+    json_str = serialize_to_json(ctx.tree)
+    restored = deserialize_from_json(json_str)
+    restored_text = unparse_tree(restored)
 
-  # Test serialization roundtrip
-  json_str = serialize_cst(ctx.tree)
-  restored = deserialize_cst(json_str)
-  restored_text = unparse_tree(restored)
+    if ctx.document != restored_text:
+      logger.error("✗ Serialization roundtrip failed")
+      return False
 
-  if ctx.document != restored_text:
-    logger.error("✗ Serialization roundtrip failed")
-    return False
-
-  logger.info("✓ Roundtrip validation passed")
-  return True
-
-
-@with_error_handling("validate")
-def handle_validate_against(ctx: ParseContext, comparison_path: Path) -> bool:
-  """Validate unparsed CST against another document."""
-  ctx.execute()
-  unparsed = unparse_tree(ctx.tree)
-  comparison = comparison_path.read_text()
-
-  # Normalize line endings for cross-platform comparison
-  unparsed_n = unparsed.replace("\r\n", "\n")
-  comparison_n = comparison.replace("\r\n", "\n")
-
-  if unparsed_n == comparison_n:
-    logger.info("✓ Validation passed - documents are equivalent")
+    logger.info("✓ Roundtrip validation passed")
     return True
-  else:
-    logger.error("✗ Validation failed - documents differ")
-    logger.error(f"  Unparsed: {len(unparsed)} chars")
-    logger.error(f"  Comparison: {len(comparison)} chars")
-    show_diff(unparsed, comparison, "unparsed", "comparison")
+  except Exception as e:
+    logger.error(f"Error: {e}")
     return False
 
 
-# ============ AST Operation Handlers ============
-@with_error_handling("ast")
 def handle_ast(ctx: ParseContext) -> bool:
-  """Build and display AST structure."""
-  ctx.execute()
-  ast = build_ast(ctx.tree)
-  logger.info("✓ AST built successfully")
-  print("\nAbstract Syntax Tree:")
-  print("-" * 50)
-  print_ast(ast)
-  return True
-
-
-@with_error_handling("serialize-ast")
-def handle_serialize_ast(ctx: ParseContext) -> bool:
-  """Build AST and serialize to JSON."""
-  ctx.execute()
-  ast = build_ast(ctx.tree)
-  json_output = serialize_ast(ast)
-  logger.info("✓ AST serialized successfully")
-  print(json_output)
-  return True
-
-
-@with_error_handling("reformat")
-def handle_reformat(ctx: ParseContext) -> bool:
-  """Reformat document through AST transformation."""
-  ctx.execute()
-  ast = build_ast(ctx.tree)
-  reformatted_cst = format_ast(ast)
-  reformatted_text = unparse_tree(reformatted_cst)
-  logger.info("✓ Document reformatted through AST")
-  print(reformatted_text)
-  return True
-
-
-@with_error_handling("ast-roundtrip")
-def handle_ast_roundtrip(ctx: ParseContext) -> bool:
-  """Validate CST → AST → CST roundtrip."""
-  ctx.execute()
-
-  # Build AST from CST
-  ast = build_ast(ctx.tree)
-
-  # Format AST back to CST
-  formatted_cst = format_ast(ast)
-  formatted_text = unparse_tree(formatted_cst)
-
-  # Parse the formatted text to get normalized CST
-  formatted_tree = parse_document(ctx.parser, formatted_text)
-
-  # Build AST from formatted CST
-  ast2 = build_ast(formatted_tree)
-
-  # Compare AST representations
-  if repr(ast) != repr(ast2):
-    logger.error("✗ AST roundtrip failed - semantic difference")
+  """Build and display AST."""
+  try:
+    ctx.load().parse()
+    ast = build_ast(ctx.tree)
+    logger.info("✓ AST built successfully")
+    print("\nAbstract Syntax Tree:")
+    print("-" * 50)
+    print_ast(ast)
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
     return False
 
-  logger.info("✓ AST roundtrip validation passed")
-  return True
+
+def handle_serialize_ast(ctx: ParseContext) -> bool:
+  """Serialize AST to JSON."""
+  try:
+    ctx.load().parse()
+    ast = build_ast(ctx.tree)
+
+    # Use registry for AST types
+    build_ast_registry()
+
+    json_output = serialize_to_json(ast)
+    logger.info("✓ AST serialized successfully")
+    print(json_output)
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
 
 
-# ============ Logging Setup ============
+def handle_reformat(ctx: ParseContext) -> bool:
+  """Reformat document via AST transformation."""
+  try:
+    ctx.load().parse()
+    ast = build_ast(ctx.tree)
+    reformatted_cst = format_ast(ast)
+    reformatted_text = unparse_tree(reformatted_cst)
+    logger.info("✓ Document reformatted through AST")
+    print(reformatted_text)
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
+
+
+def handle_ast_roundtrip(ctx: ParseContext) -> bool:
+  """Validate CST → AST → CST transformation."""
+  try:
+    ctx.load().parse()
+
+    # Build AST from CST
+    ast1 = build_ast(ctx.tree)
+
+    # Format AST back to CST
+    formatted_cst = format_ast(ast1)
+    formatted_text = unparse_tree(formatted_cst)
+
+    # Parse formatted text
+    formatted_tree = parse_document(ctx.grammar, formatted_text)
+
+    # Build AST from formatted CST
+    ast2 = build_ast(formatted_tree)
+
+    # Compare AST structures (simplified comparison)
+    if (
+      ast1.name != ast2.name
+      or ast1.description != ast2.description
+      or len(ast1.concepts) != len(ast2.concepts)
+      or len(ast1.states) != len(ast2.states)
+      or len(ast1.operations) != len(ast2.operations)
+      or len(ast1.properties) != len(ast2.properties)
+    ):
+      logger.error("✗ AST roundtrip failed - semantic difference")
+      return False
+
+    logger.info("✓ AST roundtrip validation passed")
+    return True
+  except Exception as e:
+    logger.error(f"Error: {e}")
+    return False
+
+
+# Logging Configuration
 class CompactFormatter(logging.Formatter):
-  """Compact log formatter with level-specific prefixes."""
+  """Minimal log formatting."""
 
   FORMATS = {
     logging.INFO: "%(message)s",
     logging.WARNING: "⚠ %(message)s",
     logging.ERROR: "✗ %(message)s",
-    logging.DEBUG: "%(asctime)s [%(levelname)s] %(message)s",
+    logging.DEBUG: "[%(levelname)s] %(message)s",
   }
 
   def format(self, record):
     fmt = self.FORMATS.get(record.levelno, self.FORMATS[logging.INFO])
-    return logging.Formatter(fmt, datefmt="%H:%M:%S").format(record)
+    return logging.Formatter(fmt).format(record)
 
 
 def setup_logging(level: int) -> logging.Logger:
-  """Configure logging with appropriate level and format."""
+  """Configure logging."""
   logger = logging.getLogger()
   logger.setLevel(level)
   logger.handlers.clear()
@@ -345,42 +296,48 @@ def setup_logging(level: int) -> logging.Logger:
 logger = logging.getLogger(__name__)
 
 
-# ============ CLI Interface ============
+# CLI Entry Point
+def find_project_root() -> Path:
+  """Locate project root directory."""
+  for parent in Path(__file__).parents:
+    if (parent / ".git").exists():
+      return parent
+
+  if context := os.environ.get("CONTEXT"):
+    return Path(context)
+
+  print("couldn't find project root, export CONTEXT & try again", file=sys.stderr)
+  raise SystemExit(1)
+
+
 def main():
-  """Main entry point with routing table pattern."""
+  """Main CLI entry point."""
   root = find_project_root()
 
   # Setup argument parser
   parser = argparse.ArgumentParser(
     description="Parse Natural Language Specification DSL documents",
-    epilog="Examples:\n"
-    "  %(prog)s                    # Parse default example\n"
-    "  %(prog)s --unparse          # Unparse to stdout\n"
-    "  %(prog)s --serialize        # Output JSON CST\n"
-    "  %(prog)s --ast              # Display AST structure\n"
-    "  %(prog)s --reformat         # Reformat via AST\n"
-    "  %(prog)s doc.dsl --debug    # Debug custom document\n"
-    "  %(prog)s a.dsl -v b.dsl     # Validate unparsed a.dsl equals b.dsl",
+    epilog="""Examples:
+  %(prog)s                    # Parse default example
+  %(prog)s --unparse          # Reconstruct text
+  %(prog)s --serialize        # Output JSON CST
+  %(prog)s --ast              # Display AST structure
+  %(prog)s --reformat         # Reformat via AST""",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
 
   parser.add_argument("document", type=Path, nargs="?", default=root / "spec/example.dsl", help="DSL document to parse")
   parser.add_argument("-g", "--grammar", type=Path, default=root / "grammar/TLA.lark", help="Lark grammar file")
 
-  # Output modes
-  output = parser.add_mutually_exclusive_group()
-  output.add_argument("-u", "--unparse", action="store_true", help="Unparse the document (text output)")
-  output.add_argument("-s", "--serialize", action="store_true", help="Serialize CST to JSON")
-  output.add_argument("-r", "--roundtrip", action="store_true", help="Validate CST roundtrip parsing")
-  output.add_argument(
-    "-v", "--validate-against", type=Path, metavar="FILE", help="Validate unparsed CST against another document"
-  )
-
-  # AST operations
-  output.add_argument("-a", "--ast", action="store_true", help="Build and display AST structure")
-  output.add_argument("--serialize-ast", action="store_true", help="Serialize AST to JSON")
-  output.add_argument("--reformat", action="store_true", help="Reformat document via AST transformation")
-  output.add_argument("--ast-roundtrip", action="store_true", help="Validate AST roundtrip transformation")
+  # Operations
+  ops = parser.add_mutually_exclusive_group()
+  ops.add_argument("-u", "--unparse", action="store_true", help="Reconstruct document text")
+  ops.add_argument("-s", "--serialize", action="store_true", help="Serialize CST to JSON")
+  ops.add_argument("-r", "--roundtrip", action="store_true", help="Validate roundtrip parsing")
+  ops.add_argument("-a", "--ast", action="store_true", help="Build and display AST")
+  ops.add_argument("--serialize-ast", action="store_true", help="Serialize AST to JSON")
+  ops.add_argument("--reformat", action="store_true", help="Reformat document via AST")
+  ops.add_argument("--ast-roundtrip", action="store_true", help="Validate AST roundtrip")
 
   # Options
   parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
@@ -392,38 +349,35 @@ def main():
   level = logging.DEBUG if args.debug else logging.WARNING if args.quiet else logging.INFO
   setup_logging(level)
 
-  # Validate files exist
+  # Validate files
   for path, name in [(args.grammar, "Grammar"), (args.document, "Document")]:
     if not path.exists():
       logger.critical(f"{name} file not found: {path}")
       return 1
 
-  # Create context for all operations
+  # Create context
   ctx = ParseContext(args.grammar, args.document, args.debug)
 
-  # Route to appropriate handler using routing table pattern
-  if args.unparse:
-    success = handle_unparse(ctx)
-  elif args.serialize:
-    success = handle_serialize(ctx)
-  elif args.roundtrip:
-    success = handle_roundtrip(ctx)
-  elif args.validate_against:
-    if not args.validate_against.exists():
-      logger.critical(f"Comparison file not found: {args.validate_against}")
-      return 1
-    success = handle_validate_against(ctx, args.validate_against)
-  elif args.ast:
-    success = handle_ast(ctx)
-  elif args.serialize_ast:
-    success = handle_serialize_ast(ctx)
-  elif args.reformat:
-    success = handle_reformat(ctx)
-  elif args.ast_roundtrip:
-    success = handle_ast_roundtrip(ctx)
-  else:
-    success = handle_parse(ctx)
+  # Route to handler
+  handlers = {
+    "unparse": handle_unparse,
+    "serialize": handle_serialize,
+    "roundtrip": handle_roundtrip,
+    "ast": handle_ast,
+    "serialize_ast": handle_serialize_ast,
+    "reformat": handle_reformat,
+    "ast_roundtrip": handle_ast_roundtrip,
+  }
 
+  # Determine which handler to use
+  handler = handle_parse  # default
+  for arg_name, handler_func in handlers.items():
+    if getattr(args, arg_name, False):
+      handler = handler_func
+      break
+
+  # Execute handler
+  success = handler(ctx)
   return 0 if success else 1
 
 
