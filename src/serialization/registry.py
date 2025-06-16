@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Type Registry Module
+Type Registry Module - Fixed Import
 
 Helpers for managing node type registrations for deserialization.
 """
@@ -17,7 +17,8 @@ def build_ast_registry() -> Dict[str, Type]:
   Returns:
       Dictionary mapping type names to classes
   """
-  from ast import Specification, Concept, StateDeclaration, Operation, Property
+  # Import from the correct module path
+  from syntax.abstract.nodes import Specification, Concept, StateDeclaration, Operation, Property
 
   return {
     "Specification": Specification,

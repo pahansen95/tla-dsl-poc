@@ -1,441 +1,408 @@
 #!/usr/bin/env python3
 """
-DSL Parser CLI Interface
+DSL Parser - Simplified Pipeline CLI
 
-Command-line interface for parsing, transforming, and analyzing
-Natural Language Specification DSL documents.
+Streamlined interface with intelligent type inference and minimal flags.
 """
 
 import sys
 import os
+import json
 import argparse
 from pathlib import Path
 import logging
-import difflib
-import contextlib
-import signal
+from typing import Optional, Tuple, Any
 
-# Import from reorganized package structure
+# Import from package structure
 from syntax.concrete import parse_document, unparse_tree
-from syntax.abstract import build_ast, format_ast, Specification
+from syntax.abstract import build_ast, format_ast
 from serialization import serialize_to_json, deserialize_from_json, build_ast_registry
-
 from lark import exceptions
 
 
-# Parse Context Management
-class ParseContext:
-  """Encapsulates parsing state and operations."""
-
-  def __init__(self, grammar_path: Path, document_path: Path, debug: bool = False):
-    self.grammar_path = grammar_path
-    self.document_path = document_path
-    self.debug = debug
-    self.grammar = None
-    self.document = None
-    self.tree = None
-
-  def load(self):
-    """Load grammar and document files."""
-    self.grammar = self.grammar_path.read_text()
-    self.document = self.document_path.read_text()
-    return self
-
-  def parse(self):
-    """Parse document using loaded grammar."""
-    self.tree = parse_document(self.grammar, self.document, debug=self.debug)
-    return self
+# Type definitions
+RepType = str  # 'spec', 'cst', 'ast'
+Format = str  # 'text', 'json'
 
 
-# Output Utilities
-def print_tree(tree, indent=0):
-  """Display parse tree structure."""
-  from lark import Tree, Token
+class TypeInference:
+  """Infer types and formats from file extensions and content."""
 
-  if isinstance(tree, Tree):
-    print("  " * indent + f"[{tree.data}]")
-    for child in tree.children:
-      print_tree(child, indent + 1)
-  elif isinstance(tree, Token) and logger.isEnabledFor(logging.DEBUG):
-    value = repr(str(tree))
-    if len(value) > 50:
-      value = value[:47] + "..."
-    print("  " * indent + f"Token: {value}")
+  @staticmethod
+  def from_filename(path: Path) -> Tuple[Optional[RepType], Optional[Format]]:
+    """Infer type and format from file extension."""
+    name = path.name.lower()
 
+    # Check compound extensions first
+    if name.endswith(".ast.json"):
+      return "ast", "json"
+    elif name.endswith(".cst.json"):
+      return "cst", "json"
 
-def print_ast(ast: Specification, indent=0):
-  """Display AST structure."""
-  print(f"{'  ' * indent}Specification: {ast.name}")
-  print(f"{'  ' * (indent + 1)}Description: {ast.description}")
+    # Check simple extensions
+    ext = path.suffix.lower()
+    if ext == ".dsl":
+      return "spec", "text"
+    elif ext == ".json":
+      # Try to infer from content structure
+      return None, "json"
+    elif ext in [".txt", ".text"]:
+      return None, "text"
 
-  if ast.concepts:
-    print(f"{'  ' * (indent + 1)}Concepts:")
-    for c in ast.concepts:
-      print(f"{'  ' * (indent + 2)}- {c.name}: {c.description}")
+    return None, None
 
-  if ast.states:
-    print(f"{'  ' * (indent + 1)}States:")
-    for s in ast.states:
-      print(f"{'  ' * (indent + 2)}- {s.name}")
-      for p in s.properties:
-        print(f"{'  ' * (indent + 3)}  {p}")
-      if s.initial_condition:
-        print(f"{'  ' * (indent + 3)}  {s.initial_condition}")
+  @staticmethod
+  def from_json_structure(data: dict) -> Optional[RepType]:
+    """Infer type from JSON structure."""
+    if "type" not in data:
+      return None
 
-  if ast.operations:
-    print(f"{'  ' * (indent + 1)}Operations:")
-    for o in ast.operations:
-      print(f"{'  ' * (indent + 2)}- When {o.trigger}")
+    # CST has type='tree' or type='token'
+    if data["type"] in ["tree", "token"]:
+      return "cst"
 
-  if ast.properties:
-    constraints = [p for p in ast.properties if p.property_type == "constraint"]
-    guarantees = [p for p in ast.properties if p.property_type == "guarantee"]
+    # AST has type='Specification' or other AST node names
+    if data["type"] in ["Specification", "Concept", "StateDeclaration", "Operation", "Property"]:
+      return "ast"
 
-    if constraints:
-      print(f"{'  ' * (indent + 1)}Constraints:")
-      for c in constraints:
-        print(f"{'  ' * (indent + 2)}- {c.name}")
+    return None
 
-    if guarantees:
-      print(f"{'  ' * (indent + 1)}Guarantees:")
-      for g in guarantees:
-        print(f"{'  ' * (indent + 2)}- {g.name}")
+  @staticmethod
+  def next_type(current: RepType) -> RepType:
+    """Get next type in natural progression."""
+    progression = {"spec": "cst", "cst": "ast", "ast": "spec"}
+    return progression.get(current, "cst")
 
-
-def show_diff(text1: str, text2: str, label1: str, label2: str):
-  """Display unified diff between texts."""
-  diff = difflib.unified_diff(
-    text1.splitlines(keepends=True), text2.splitlines(keepends=True), fromfile=label1, tofile=label2
-  )
-  print("\nDifferences:")
-  print("".join(diff))
+  @staticmethod
+  def default_format(rep_type: RepType, is_stdout: bool) -> Format:
+    """Get default format for type and destination."""
+    if rep_type == "spec":
+      return "text"
+    # Use JSON for structured data when piping
+    return "json" if is_stdout else "text"
 
 
-# Operation Handlers
-def handle_parse(ctx: ParseContext) -> bool:
-  """Parse and display tree structure."""
-  try:
-    ctx.load().parse()
-    logger.info("✓ Document parsed successfully")
-    print("\nParse Tree:")
-    print("-" * 50)
-    print_tree(ctx.tree)
-    return True
-  except exceptions.ParseError as e:
-    logger.error(f"Parse Error: {e}")
-    return False
+class PipelineProcessor:
+  """Simplified pipeline processor with inference support."""
 
+  def __init__(self, grammar_path: Path):
+    self.grammar = grammar_path.read_text()
+    self.ast_registry = build_ast_registry()
 
-def handle_unparse(ctx: ParseContext) -> bool:
-  """Parse and reconstruct document text."""
-  try:
-    ctx.load().parse()
-    unparsed = unparse_tree(ctx.tree)
-    logger.info("✓ Document unparsed successfully")
-    print(unparsed)
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
+  def process(
+    self,
+    input_content: str,
+    from_type: Optional[RepType],
+    to_type: Optional[RepType],
+    format_override: Optional[Format],
+    input_path: Optional[Path],
+    output_path: Optional[Path],
+  ) -> str:
+    """Process transformation with intelligent defaults."""
 
+    # Infer input type if needed
+    if from_type is None:
+      from_type = self._infer_input_type(input_content, input_path)
 
-def handle_serialize(ctx: ParseContext) -> bool:
-  """Serialize CST to JSON."""
-  try:
-    ctx.load().parse()
-    json_output = serialize_to_json(ctx.tree)
-    logger.info("✓ CST serialized successfully")
-    print(json_output)
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
+    # Load input based on type
+    data = self._load_input(input_content, from_type)
 
+    # Infer output type if needed
+    if to_type is None:
+      to_type = TypeInference.next_type(from_type)
 
-def handle_roundtrip(ctx: ParseContext) -> bool:
-  """Validate parse/unparse roundtrip."""
-  try:
-    ctx.load().parse()
+    # Transform data
+    result = self._transform(data, from_type, to_type)
 
-    # Test unparsing
-    unparsed = unparse_tree(ctx.tree)
-    if ctx.document != unparsed:
-      logger.error("✗ Unparsing roundtrip failed")
-      if logger.isEnabledFor(logging.DEBUG):
-        show_diff(ctx.document, unparsed, "original", "unparsed")
-      return False
+    # Determine output format
+    output_format = self._determine_format(to_type, format_override, output_path)
 
-    # Test serialization
-    json_str = serialize_to_json(ctx.tree)
-    restored = deserialize_from_json(json_str)
-    restored_text = unparse_tree(restored)
+    # Format output
+    return self._format_output(result, to_type, output_format)
 
-    if ctx.document != restored_text:
-      logger.error("✗ Serialization roundtrip failed")
-      return False
+  def _infer_input_type(self, content: str, path: Optional[Path]) -> RepType:
+    """Infer input type from content and path."""
+    # Try filename first
+    if path:
+      file_type, _ = TypeInference.from_filename(path)
+      if file_type:
+        return file_type
 
-    logger.info("✓ Roundtrip validation passed")
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
-
-
-def handle_ast(ctx: ParseContext) -> bool:
-  """Build and display AST."""
-  try:
-    ctx.load().parse()
-    ast = build_ast(ctx.tree)
-    logger.info("✓ AST built successfully")
-    print("\nAbstract Syntax Tree:")
-    print("-" * 50)
-    print_ast(ast)
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
-
-
-def handle_serialize_ast(ctx: ParseContext) -> bool:
-  """Serialize AST to JSON."""
-  try:
-    ctx.load().parse()
-    ast = build_ast(ctx.tree)
-
-    # Use registry for AST types
-    build_ast_registry()
-
-    json_output = serialize_to_json(ast)
-    logger.info("✓ AST serialized successfully")
-    print(json_output)
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
-
-
-def handle_reformat(ctx: ParseContext) -> bool:
-  """Reformat document via AST transformation."""
-  try:
-    ctx.load().parse()
-    ast = build_ast(ctx.tree)
-    reformatted_cst = format_ast(ast)
-    reformatted_text = unparse_tree(reformatted_cst)
-    logger.info("✓ Document reformatted through AST")
-    print(reformatted_text)
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
-
-
-def handle_ast_roundtrip(ctx: ParseContext) -> bool:
-  """Validate CST → AST → CST transformation."""
-  try:
-    ctx.load().parse()
-
-    # Build AST from CST
-    ast1 = build_ast(ctx.tree)
-
-    # Format AST back to CST
-    formatted_cst = format_ast(ast1)
-    formatted_text = unparse_tree(formatted_cst)
-
-    # Parse formatted text
-    formatted_tree = parse_document(ctx.grammar, formatted_text)
-
-    # Build AST from formatted CST
-    ast2 = build_ast(formatted_tree)
-
-    # Compare AST structures (simplified comparison)
-    if (
-      ast1.name != ast2.name
-      or ast1.description != ast2.description
-      or len(ast1.concepts) != len(ast2.concepts)
-      or len(ast1.states) != len(ast2.states)
-      or len(ast1.operations) != len(ast2.operations)
-      or len(ast1.properties) != len(ast2.properties)
-    ):
-      logger.error("✗ AST roundtrip failed - semantic difference")
-      return False
-
-    logger.info("✓ AST roundtrip validation passed")
-    return True
-  except Exception as e:
-    logger.error(f"Error: {e}")
-    return False
-
-
-class CompactFormatter(logging.Formatter):
-  """Minimal log formatting."""
-
-  FORMATS = {
-    logging.INFO: "%(message)s",
-    logging.WARNING: "⚠ %(message)s",
-    logging.ERROR: "✗ %(message)s",
-    logging.DEBUG: "[%(levelname)s] %(message)s",
-  }
-
-  def format(self, record):
-    fmt = self.FORMATS.get(record.levelno, self.FORMATS[logging.INFO])
-    return logging.Formatter(fmt).format(record)
-
-
-class SafeStreamHandler(logging.StreamHandler):
-  """Stream handler that ignores broken pipe errors."""
-
-  def emit(self, record):
+    # Try to parse as JSON and check structure
     try:
-      super().emit(record)
-    except BrokenPipeError:
-      pass
-    except IOError as e:
-      if e.errno == 32:  # EPIPE
-        pass
-      else:
-        raise
+      data = json.loads(content)
+      json_type = TypeInference.from_json_structure(data)
+      if json_type:
+        return json_type
+    except json.JSONDecodeError:
+      # Not JSON, assume spec
+      return "spec"
+
+    # Default to spec for text input
+    return "spec"
+
+  def _load_input(self, content: str, input_type: RepType) -> Any:
+    """Load input based on type."""
+    if input_type == "spec":
+      return parse_document(self.grammar, content)
+
+    elif input_type == "cst":
+      data = json.loads(content)
+      return deserialize_from_json(json.dumps(data))
+
+    elif input_type == "ast":
+      data = json.loads(content)
+      return deserialize_from_json(json.dumps(data), self.ast_registry)
+
+    raise ValueError(f"Unknown input type: {input_type}")
+
+  def _transform(self, data: Any, from_type: RepType, to_type: RepType) -> Any:
+    """Transform between representations."""
+    if from_type == to_type:
+      return data
+
+    # Define transformation paths
+    if from_type == "spec" and to_type == "cst":
+      return data  # Already CST from parse
+    elif from_type == "spec" and to_type == "ast":
+      return build_ast(data)
+    elif from_type == "cst" and to_type == "ast":
+      return build_ast(data)
+    elif from_type == "cst" and to_type == "spec":
+      return unparse_tree(data)
+    elif from_type == "ast" and to_type == "cst":
+      return format_ast(data)
+    elif from_type == "ast" and to_type == "spec":
+      cst = format_ast(data)
+      return unparse_tree(cst)
+
+    raise ValueError(f"Cannot transform {from_type} to {to_type}")
+
+  def _determine_format(
+    self, output_type: RepType, format_override: Optional[Format], output_path: Optional[Path]
+  ) -> Format:
+    """Determine output format with smart defaults."""
+    # Explicit override takes precedence
+    if format_override:
+      return format_override
+
+    # Infer from output filename
+    if output_path:
+      _, file_format = TypeInference.from_filename(output_path)
+      if file_format:
+        return file_format
+
+    # Use defaults based on type and destination
+    is_stdout = output_path is None
+    return TypeInference.default_format(output_type, is_stdout)
+
+  def _format_output(self, data: Any, output_type: RepType, format: Format) -> str:
+    """Format output based on type and format."""
+    if output_type == "spec":
+      # Spec is always text
+      return data if isinstance(data, str) else str(data)
+
+    if format == "json":
+      return serialize_to_json(data)
+
+    # Text representation
+    if output_type == "cst":
+      return self._format_cst_text(data)
+    elif output_type == "ast":
+      return self._format_ast_text(data)
+
+    raise ValueError(f"Cannot format {output_type} as {format}")
+
+  def _format_cst_text(self, tree) -> str:
+    """Human-readable CST representation."""
+    from lark import Tree, Token
+
+    lines = []
+
+    def print_tree(node, indent=0):
+      if isinstance(node, Tree):
+        lines.append("  " * indent + f"[{node.data}]")
+        for child in node.children:
+          print_tree(child, indent + 1)
+      elif isinstance(node, Token):
+        value = repr(str(node))
+        if len(value) > 50:
+          value = value[:47] + "..."
+        lines.append("  " * indent + f"{node.type}: {value}")
+
+    print_tree(tree)
+    return "\n".join(lines)
+
+  def _format_ast_text(self, ast) -> str:
+    """Human-readable AST representation."""
+    lines = []
+    lines.append(f"Specification: {ast.name}")
+    lines.append(f"  Description: {ast.description}")
+
+    if ast.concepts:
+      lines.append("  Concepts:")
+      for c in ast.concepts:
+        lines.append(f"    - {c.name}: {c.description}")
+
+    if ast.states:
+      lines.append("  States:")
+      for s in ast.states:
+        lines.append(f"    - {s.name}")
+
+    if ast.operations:
+      lines.append("  Operations:")
+      for o in ast.operations:
+        lines.append(f"    - When {o.trigger}")
+
+    return "\n".join(lines)
 
 
-def setup_logging(level: int) -> logging.Logger:
-  """Configure logging with broken pipe protection."""
-  logger = logging.getLogger()
-  logger.setLevel(level)
-  logger.handlers.clear()
+# I/O utilities
+def setup_logging(verbose: bool = False, quiet: bool = False):
+  """Configure logging to stderr."""
+  if quiet:
+    level = logging.WARNING
+  elif verbose:
+    level = logging.DEBUG
+  else:
+    level = logging.INFO
 
-  # Use safe handler instead of regular StreamHandler
-  handler = SafeStreamHandler(sys.stdout)
-  handler.setFormatter(CompactFormatter())
-  logger.addHandler(handler)
-
-  return logger
-
-
-logger = logging.getLogger(__name__)
+  logging.basicConfig(
+    level=level, format="[%(levelname)s] %(message)s" if verbose else "%(message)s", stream=sys.stderr
+  )
 
 
-# CLI Entry Point
-def find_project_root() -> Path:
-  """Locate project root directory."""
+def find_grammar() -> Path:
+  """Find grammar file with fallback locations."""
+  # Try project root first
   for parent in Path(__file__).parents:
     if (parent / ".git").exists():
-      return parent
+      grammar = parent / "grammar/TLA.lark"
+      if grammar.exists():
+        return grammar
 
+  # Try relative to script
+  script_dir = Path(__file__).parent
+  grammar = script_dir.parent / "grammar/TLA.lark"
+  if grammar.exists():
+    return grammar
+
+  # Environment variable fallback
   if context := os.environ.get("CONTEXT"):
-    return Path(context)
+    grammar = Path(context) / "grammar/TLA.lark"
+    if grammar.exists():
+      return grammar
 
-  print("couldn't find project root, export CONTEXT & try again", file=sys.stderr)
-  raise SystemExit(1)
+  raise FileNotFoundError("Cannot find grammar file. Set CONTEXT environment variable.")
 
 
+# Main entry point
 def main():
-  """Main CLI entry point."""
-  root = find_project_root()
-
-  # Setup argument parser
+  """Simplified CLI entry point."""
   parser = argparse.ArgumentParser(
-    description="Parse Natural Language Specification DSL documents",
+    prog="lex",
+    description="Transform between spec/cst/ast representations",
     epilog="""Examples:
-  %(prog)s                    # Parse default example
-  %(prog)s --unparse          # Reconstruct text
-  %(prog)s --serialize        # Output JSON CST
-  %(prog)s --ast              # Display AST structure
-  %(prog)s --reformat         # Reformat via AST""",
+  %(prog)s example.dsl                    # spec → cst (json to stdout)
+  %(prog)s example.dsl output.ast.json    # spec → ast (inferred from extension)
+  %(prog)s input.json output.dsl          # auto-detect → spec
+  %(prog)s -f cst -t spec < input.json   # explicit types
+  %(prog)s example.dsl --text             # force text output""",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
 
-  parser.add_argument("document", type=Path, nargs="?", default=root / "spec/example.dsl", help="DSL document to parse")
-  parser.add_argument("-g", "--grammar", type=Path, default=root / "grammar/TLA.lark", help="Lark grammar file")
+  # Positional arguments
+  parser.add_argument("input_file", nargs="?", type=Path, help="Input file (default: stdin)")
+  parser.add_argument("output_file", nargs="?", type=Path, help="Output file (default: stdout)")
 
-  # Operations
-  ops = parser.add_mutually_exclusive_group()
-  ops.add_argument("-u", "--unparse", action="store_true", help="Reconstruct document text")
-  ops.add_argument("-s", "--serialize", action="store_true", help="Serialize CST to JSON")
-  ops.add_argument("-r", "--roundtrip", action="store_true", help="Validate roundtrip parsing")
-  ops.add_argument("-a", "--ast", action="store_true", help="Build and display AST")
-  ops.add_argument("--serialize-ast", action="store_true", help="Serialize AST to JSON")
-  ops.add_argument("--reformat", action="store_true", help="Reformat document via AST")
-  ops.add_argument("--ast-roundtrip", action="store_true", help="Validate AST roundtrip")
+  # Type specification
+  parser.add_argument(
+    "-f", "--from", dest="from_type", choices=["spec", "cst", "ast"], help="Input type (default: auto-detect)"
+  )
+  parser.add_argument(
+    "-t", "--to", dest="to_type", choices=["spec", "cst", "ast"], help="Output type (default: next in progression)"
+  )
 
-  # Options
-  parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
-  parser.add_argument("-q", "--quiet", action="store_true", help="Minimal output")
+  # Format override
+  format_group = parser.add_mutually_exclusive_group()
+  format_group.add_argument("--text", action="store_const", const="text", dest="format", help="Force text output")
+  format_group.add_argument("--json", action="store_const", const="json", dest="format", help="Force JSON output")
+
+  # Other options
+  parser.add_argument("-g", "--grammar", type=Path, help="Grammar file (default: auto-detect)")
+
+  verbosity = parser.add_mutually_exclusive_group()
+  verbosity.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+  verbosity.add_argument("-q", "--quiet", action="store_true", help="Suppress info messages")
 
   args = parser.parse_args()
 
-  # Configure logging
-  level = logging.DEBUG if args.debug else logging.WARNING if args.quiet else logging.INFO
-  setup_logging(level)
+  # Setup logging
+  setup_logging(args.verbose, args.quiet)
 
-  # Validate files
-  for path, name in [(args.grammar, "Grammar"), (args.document, "Document")]:
-    if not path.exists():
-      logger.critical(f"{name} file not found: {path}")
+  # Find grammar
+  try:
+    grammar_path = args.grammar or find_grammar()
+  except FileNotFoundError as e:
+    logging.error(str(e))
+    return 1
+
+  # Read input
+  if args.input_file:
+    if not args.input_file.exists():
+      logging.error(f"Input file not found: {args.input_file}")
       return 1
+    input_content = args.input_file.read_text()
+    logging.debug(f"Read {len(input_content)} bytes from {args.input_file}")
+  else:
+    input_content = sys.stdin.read()
+    logging.debug(f"Read {len(input_content)} bytes from stdin")
 
-  # Create context
-  ctx = ParseContext(args.grammar, args.document, args.debug)
-
-  # Route to handler
-  handlers = {
-    "unparse": handle_unparse,
-    "serialize": handle_serialize,
-    "roundtrip": handle_roundtrip,
-    "ast": handle_ast,
-    "serialize_ast": handle_serialize_ast,
-    "reformat": handle_reformat,
-    "ast_roundtrip": handle_ast_roundtrip,
-  }
-
-  # Determine which handler to use
-  handler = handle_parse  # default
-  for arg_name, handler_func in handlers.items():
-    if getattr(args, arg_name, False):
-      handler = handler_func
-      break
-
-  # Execute handler
-  success = handler(ctx)
-  return 0 if success else 1
-
-
-@contextlib.contextmanager
-def cli_session(*args):
-  # Handle SIGPIPE for Unix pipelines
-  try:
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-  except AttributeError:
-    # Windows doesn't have SIGPIPE
-    pass
-
-  rc = 0
+  # Process pipeline
+  processor = PipelineProcessor(grammar_path)
 
   try:
-    yield
-  except SystemExit as e:
-    rc = e.code
-  except BrokenPipeError:
-    rc = 1
-  except IOError as e:
-    rc = 2
-    if e.errno not in {
-      32,
-    }:  # EPIPE
-      logger.critical("Unhandled IO Error", exc_info=True)
-  except Exception:
-    rc = 2
-    logger.critical("Unhandled Exception", exc_info=True)
-  finally:
-    # Suppress broken pipe errors during cleanup
-    try:
-      logging.shutdown()
-      sys.stdout.flush()
-    except (BrokenPipeError, IOError):
-      pass
+    output = processor.process(
+      input_content, args.from_type, args.to_type, args.format, args.input_file, args.output_file
+    )
 
-  # Use os._exit to avoid further cleanup issues
-  os._exit(rc)
+    # Write output
+    if args.output_file:
+      args.output_file.write_text(output)
+      if args.output_file.suffix == ".json":
+        # Pretty-print JSON files
+        data = json.loads(output)
+        args.output_file.write_text(json.dumps(data, indent=2))
+      else:
+        args.output_file.write_text(output)
+      logging.info(f"Wrote output to {args.output_file}")
+    else:
+      print(output, end="")
+
+    return 0
+
+  except exceptions.ParseError as e:
+    logging.error(f"Parse error: {e}")
+    return 1
+  except json.JSONDecodeError as e:
+    logging.error(f"Invalid JSON: {e}")
+    return 1
+  except Exception as e:
+    logging.error(f"Error: {e}")
+    if args.verbose:
+      import traceback
+
+      traceback.print_exc()
+    return 1
 
 
 if __name__ == "__main__":
-  with cli_session():
-    main()
+  try:
+    sys.exit(main())
+  except KeyboardInterrupt:
+    sys.exit(130)
+  except BrokenPipeError:
+    # Silent exit for broken pipes
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, sys.stdout.fileno())
+    sys.exit(1)
