@@ -9,7 +9,7 @@ from typing import List, Optional
 from lark import Tree
 
 from cst import find_child, find_all
-from .utils import extract_text
+from common import extract_text
 from .nodes import Specification, Concept, StateDeclaration, Operation, Property
 
 
@@ -26,7 +26,9 @@ class ASTBuilder:
 
     # Extract sections
     if definitions := find_child(cst, "definitions"):
-      spec.concepts = self._extract_concepts(definitions)
+      spec.concepts = self._extract_named_items(
+        definitions, "concept_def", Concept, "concept_name", "concept_description"
+      )
 
     if states := find_child(cst, "state_section"):
       spec.states = self._extract_states(states)
@@ -46,16 +48,24 @@ class ASTBuilder:
       return " ".join(lines)
     return ""
 
-  def _extract_concepts(self, definitions: Tree) -> List[Concept]:
-    """Extract concept definitions."""
-    return [
-      Concept(
-        name=self._extract_from_child(node, "concept_name"),
-        description=self._extract_from_child(node, "concept_description", ""),
-      )
-      for node in find_all(definitions, "concept_def")
-      if self._extract_from_child(node, "concept_name")
-    ]
+  def _extract_named_items(
+    self, parent: Tree, item_type: str, constructor, name_field: str, desc_field: str = None
+  ) -> List:
+    """
+    Generic extraction for named items.
+
+    Reduces duplication in extracting concepts, properties, etc.
+    """
+    items = []
+    for node in find_all(parent, item_type):
+      name = self._extract_from_child(node, name_field)
+      if name:
+        if desc_field:
+          desc = self._extract_from_child(node, desc_field, "")
+          items.append(constructor(name, desc))
+        else:
+          items.append(constructor(name))
+    return items
 
   def _extract_states(self, state_section: Tree) -> List[StateDeclaration]:
     """Extract state declarations."""

@@ -2,69 +2,39 @@
 """
 AST Utilities
 
-Helper functions for AST operations including text extraction.
+Helper functions specific to AST operations.
 """
 
-from typing import Union, List
-from lark import Tree, Token
+from common import extract_text as common_extract_text, TokenFactory
 
 
-def extract_text(node, mode: str = "line") -> Union[str, List[str]]:
+def extract_text(node, mode: str = "line"):
   """
-  Extract text content from CST nodes in various formats.
+  Extract text from CST nodes.
+
+  Delegates to common text extraction for consistency.
 
   Args:
       node: CST node to extract from
-      mode: Extraction mode
-          - 'raw': Unprocessed text including whitespace
-          - 'line': Single line with normalized whitespace
-          - 'lines': List of normalized lines
+      mode: 'raw', 'line', or 'lines'
 
   Returns:
-      Extracted text as string or list of strings
+      Extracted text based on mode
   """
-  raw = _get_raw_text(node)
-
-  if mode == "raw":
-    return raw
-  elif mode == "line":
-    return " ".join(raw.split())
-  elif mode == "lines":
-    return _split_into_lines(raw)
-  else:
-    raise ValueError(f"Unknown extraction mode: {mode}")
+  return common_extract_text(node, mode)
 
 
-def _get_raw_text(node) -> str:
-  """Recursively extract all text content."""
-  if isinstance(node, Token):
-    return str(node)
-  elif isinstance(node, Tree):
-    return "".join(_get_raw_text(child) for child in node.children)
-  return str(node)
-
-
-def _split_into_lines(raw: str) -> List[str]:
-  """Split text into normalized lines."""
-  lines = []
-  for line in raw.split("\n"):
-    normalized = " ".join(line.split())
-    if normalized:
-      lines.append(normalized)
-  return lines
-
-
-def create_indent(level: int, size: int = 2) -> Token:
+def create_indent(level: int, size: int = 2):
   """
   Create indentation token.
+
+  Delegates to common TokenFactory for consistent token creation.
 
   Args:
       level: Indentation level (1 or 2)
       size: Spaces per indent level
 
   Returns:
-      Indent token with appropriate type
+      INDENT or DOUBLE_INDENT token
   """
-  spaces = " " * (size * level)
-  token_type = "INDENT" if level == 1 else "DOUBLE_INDENT"
-  return Token(token_type, spaces)
+  return TokenFactory.indent(level, size)

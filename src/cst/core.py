@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-CST Parser Module
+Core CST Operations
 
-Handles parsing of DSL documents into Concrete Syntax Trees.
+Fundamental parsing and unparsing operations for Concrete Syntax Trees.
 """
 
-from lark import Lark, Tree
+from lark import Lark, Tree, Token
+from typing import Union
+from common import extract_raw_text
 
 
 def parse_document(grammar: str, document: str, start: str = "specification", debug: bool = False) -> Tree:
   """
-  Parse a DSL document into a Concrete Syntax Tree.
+  Parse DSL document into Concrete Syntax Tree.
 
   Args:
       grammar: Grammar definition in Lark format
@@ -31,8 +33,24 @@ def parse_document(grammar: str, document: str, start: str = "specification", de
     start=start,
     parser="earley",
     ambiguity="resolve",
-    keep_all_tokens=True,  # Preserve all tokens for unparsing
+    keep_all_tokens=True,
     debug=debug,
   )
 
   return parser.parse(document)
+
+
+def unparse_tree(node: Union[Tree, Token]) -> str:
+  """
+  Reconstruct text from Concrete Syntax Tree.
+
+  Uses common text extraction to concatenate all token values,
+  preserving original document formatting.
+
+  Args:
+      node: Lark Tree or Token from the CST
+
+  Returns:
+      Text representation of the node and all children
+  """
+  return extract_raw_text(node)

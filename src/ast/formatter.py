@@ -2,13 +2,13 @@
 """
 AST Formatter Module
 
-Generates Concrete Syntax Trees from Abstract Syntax Trees.
+Transforms Abstract Syntax Trees back into formatted Concrete Syntax Trees.
 """
 
 from typing import List, Dict, Any
-from lark import Tree, Token
+from lark import Tree
 
-from cst import text_to_tokens
+from common import TokenFactory
 from .utils import create_indent
 from .nodes import Specification, Property
 
@@ -18,6 +18,7 @@ class ASTFormatter:
 
   def __init__(self, style: Dict[str, Any] = None):
     self.style = style or {"indent_size": 2, "section_spacing": 1, "bullet_char": "-"}
+    self.tokens = TokenFactory()
 
   def format(self, ast: Specification) -> Tree:
     """Convert AST specification to formatted CST."""
@@ -48,45 +49,45 @@ class ASTFormatter:
       children.append(section)
       if i < len(sections) - 1:
         for _ in range(self.style["section_spacing"]):
-          children.append(Token("NEWLINE", "\n"))
+          children.append(self.tokens.newline())
 
-    children.append(Token("NEWLINE", "\n"))
+    children.append(self.tokens.newline())
 
     return Tree("specification", children)
 
   def _format_header(self, ast: Specification) -> Tree:
     """Format header section."""
-    children = [Token("LITERAL", "System:"), Token("WS", " ")]
+    children = [self.tokens.literal("System:"), self.tokens.whitespace()]
 
-    name_tokens = text_to_tokens(ast.name)
+    name_tokens = self.tokens.from_text(ast.name)
     children.append(Tree("system_name", name_tokens))
-    children.append(Token("NEWLINE", "\n"))
+    children.append(self.tokens.newline())
 
     if ast.description:
-      children.append(Token("NEWLINE", "\n"))
-      desc_tokens = text_to_tokens(ast.description)
+      children.append(self.tokens.newline())
+      desc_tokens = self.tokens.from_text(ast.description)
       children.append(Tree("description", desc_tokens))
 
     return Tree("header", children)
 
   def _format_definitions(self, ast: Specification) -> Tree:
     """Format concepts section."""
-    children = [Token("NEWLINE", "\n")]
-    children.extend(text_to_tokens("The system uses these concepts:"))
-    children.append(Token("NEWLINE", "\n"))
+    children = [self.tokens.newline()]
+    children.extend(self.tokens.from_text("The system uses these concepts:"))
+    children.append(self.tokens.newline())
 
     concept_items = []
     for concept in ast.concepts:
-      concept_items.extend([Token("LITERAL", self.style["bullet_char"]), Token("WS", " ")])
+      concept_items.extend([self.tokens.literal(self.style["bullet_char"]), self.tokens.whitespace()])
 
-      name_tokens = text_to_tokens(concept.name)
+      name_tokens = self.tokens.from_text(concept.name)
       concept_items.append(Tree("concept_name", name_tokens))
 
-      concept_items.extend([Token("LITERAL", ":"), Token("WS", " ")])
+      concept_items.extend([self.tokens.literal(":"), self.tokens.whitespace()])
 
-      desc_tokens = text_to_tokens(concept.description)
+      desc_tokens = self.tokens.from_text(concept.description)
       concept_items.append(Tree("concept_description", desc_tokens))
-      concept_items.append(Token("NEWLINE", "\n"))
+      concept_items.append(self.tokens.newline())
 
     children.append(Tree("concept_list", concept_items))
 
@@ -94,15 +95,15 @@ class ASTFormatter:
 
   def _format_states(self, ast: Specification) -> Tree:
     """Format state section."""
-    children = [Token("NEWLINE", "\n")]
-    children.extend(text_to_tokens("The system maintains:"))
-    children.extend([Token("NEWLINE", "\n"), Token("NEWLINE", "\n")])
+    children = [self.tokens.newline()]
+    children.extend(self.tokens.from_text("The system maintains:"))
+    children.extend([self.tokens.newline(), self.tokens.newline()])
 
     state_items = []
     for i, state in enumerate(ast.states):
       # State header
-      name_tokens = text_to_tokens(state.name)
-      header = Tree("state_header", [Tree("state_name", name_tokens), Token("LITERAL", ":"), Token("NEWLINE", "\n")])
+      name_tokens = self.tokens.from_text(state.name)
+      header = Tree("state_header", [Tree("state_name", name_tokens), self.tokens.literal(":"), self.tokens.newline()])
 
       # Properties
       prop_items = []
@@ -112,15 +113,15 @@ class ASTFormatter:
 
       for prop in all_props:
         prop_items.append(create_indent(1, self.style["indent_size"]))
-        prop_tokens = text_to_tokens(prop)
+        prop_tokens = self.tokens.from_text(prop)
         prop_items.append(Tree("property_line", prop_tokens))
-        prop_items.append(Token("NEWLINE", "\n"))
+        prop_items.append(self.tokens.newline())
 
       state_items.append(header)
       state_items.append(Tree("state_properties", prop_items))
 
       if i < len(ast.states) - 1:
-        state_items.append(Token("NEWLINE", "\n"))
+        state_items.append(self.tokens.newline())
 
     children.append(Tree("state_list", state_items))
 
@@ -131,32 +132,32 @@ class ASTFormatter:
     op_items = []
 
     for op in ast.operations:
-      items = [Token("NEWLINE", "\n"), Token("LITERAL", "When"), Token("WS", " ")]
+      items = [self.tokens.newline(), self.tokens.literal("When"), self.tokens.whitespace()]
 
-      trigger_tokens = text_to_tokens(op.trigger)
+      trigger_tokens = self.tokens.from_text(op.trigger)
       items.append(Tree("trigger", trigger_tokens))
-      items.extend([Token("LITERAL", ":"), Token("NEWLINE", "\n")])
+      items.extend([self.tokens.literal(":"), self.tokens.newline()])
 
       # Preconditions
       precond_items = []
       for precond in op.preconditions:
         precond_items.append(create_indent(1, self.style["indent_size"]))
-        line_tokens = text_to_tokens(precond)
+        line_tokens = self.tokens.from_text(precond)
         precond_items.append(Tree("precondition_line", line_tokens))
-        precond_items.append(Token("NEWLINE", "\n"))
+        precond_items.append(self.tokens.newline())
 
       # Then marker
-      trans_items = [create_indent(1, self.style["indent_size"]), Token("LITERAL", "Then:"), Token("NEWLINE", "\n")]
+      trans_items = [create_indent(1, self.style["indent_size"]), self.tokens.literal("Then:"), self.tokens.newline()]
 
       # Effects
       effect_items = []
       all_effects = op.effects + op.unchanged
       for effect in all_effects:
         effect_items.append(create_indent(2, self.style["indent_size"]))
-        effect_items.extend([Token("LITERAL", self.style["bullet_char"]), Token("WS", " ")])
+        effect_items.extend([self.tokens.literal(self.style["bullet_char"]), self.tokens.whitespace()])
 
-        effect_tokens = text_to_tokens(effect)
-        content = Tree("effect_content", effect_tokens + [Token("NEWLINE", "\n")])
+        effect_tokens = self.tokens.from_text(effect)
+        content = Tree("effect_content", effect_tokens + [self.tokens.newline()])
         effect_items.append(Tree("effect", [content]))
 
       # Build operation
@@ -172,27 +173,27 @@ class ASTFormatter:
 
     # Constraints
     if constraints:
-      children.append(Token("NEWLINE", "\n"))
-      children.extend(text_to_tokens("System Constraints:"))
-      children.extend([Token("NEWLINE", "\n"), Token("NEWLINE", "\n")])
+      children.append(self.tokens.newline())
+      children.extend(self.tokens.from_text("System Constraints:"))
+      children.extend([self.tokens.newline(), self.tokens.newline()])
 
       constraint_items = []
       for prop in constraints:
         constraint_items.extend(self._format_property(prop, "constraint_item"))
-        constraint_items.append(Token("NEWLINE", "\n"))
+        constraint_items.append(self.tokens.newline())
 
       children.append(Tree("constraint_list", constraint_items))
 
     # Guarantees
     if guarantees:
-      children.append(Token("NEWLINE", "\n"))
-      children.extend(text_to_tokens("System Guarantees:"))
-      children.extend([Token("NEWLINE", "\n"), Token("NEWLINE", "\n")])
+      children.append(self.tokens.newline())
+      children.extend(self.tokens.from_text("System Guarantees:"))
+      children.extend([self.tokens.newline(), self.tokens.newline()])
 
       guarantee_items = []
       for prop in guarantees:
         guarantee_items.extend(self._format_property(prop, "guarantee_item"))
-        guarantee_items.append(Token("NEWLINE", "\n"))
+        guarantee_items.append(self.tokens.newline())
 
       children.append(Tree("guarantee_list", guarantee_items))
 
@@ -202,11 +203,11 @@ class ASTFormatter:
     """Format a single property."""
     items = []
 
-    name_tokens = text_to_tokens(prop.name)
+    name_tokens = self.tokens.from_text(prop.name)
     items.append(Tree("property_name", name_tokens))
-    items.extend([Token("LITERAL", ":"), Token("NEWLINE", "\n"), create_indent(1, self.style["indent_size"])])
+    items.extend([self.tokens.literal(":"), self.tokens.newline(), create_indent(1, self.style["indent_size"])])
 
-    content_tokens = text_to_tokens(prop.content)
+    content_tokens = self.tokens.from_text(prop.content)
     items.append(Tree("property_content", content_tokens))
 
     return [Tree(node_type, items)]

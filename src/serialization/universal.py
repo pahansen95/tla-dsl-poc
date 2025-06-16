@@ -2,12 +2,13 @@
 """
 Universal Serialization Module
 
-Core serialization logic for both CST and AST structures.
+Provides unified JSON serialization for both CST and AST structures.
 """
 
 from lark import Tree, Token
 from typing import Dict, Any
 import json
+from common import extract_position, apply_position, is_cst_tree, is_cst_token, is_serializable_node
 
 
 class UniversalSerializer:
@@ -16,16 +17,16 @@ class UniversalSerializer:
   def serialize(self, node) -> Dict[str, Any]:
     """Convert node to dictionary representation."""
     # CST Token
-    if isinstance(node, Token):
-      return {"type": "token", "value": str(node), "token_type": node.type, **self._extract_position(node)}
+    if is_cst_token(node):
+      return {"type": "token", "value": str(node), "token_type": node.type, **extract_position(node)}
 
     # CST Tree
-    elif isinstance(node, Tree):
+    elif is_cst_tree(node):
       return {
         "type": "tree",
         "name": node.data,
         "children": [self.serialize(child) for child in node.children],
-        "meta": self._extract_position(node),
+        "meta": extract_position(node),
       }
 
     # AST Node (has __dict__)
@@ -42,8 +43,8 @@ class UniversalSerializer:
 
         # Handle collections and nested nodes
         if isinstance(value, list):
-          data[key] = [self.serialize(item) if self._is_node(item) else item for item in value]
-        elif self._is_node(value):
+          data[key] = [self.serialize(item) if is_serializable_node(item) else item for item in value]
+        elif is_serializable_node(value):
           data[key] = self.serialize(value)
         else:
           data[key] = value
@@ -53,21 +54,6 @@ class UniversalSerializer:
     # Literal value
     else:
       return {"type": "literal", "value": str(node)}
-
-  def _extract_position(self, obj) -> Dict[str, Any]:
-    """Extract position metadata from CST nodes."""
-    meta = {}
-    source = getattr(obj, "meta", obj) if hasattr(obj, "meta") else obj
-
-    for attr in ["line", "column", "end_line", "end_column"]:
-      if hasattr(source, attr) and (val := getattr(source, attr)) is not None:
-        meta[attr] = val
-
-    return meta
-
-  def _is_node(self, obj) -> bool:
-    """Check if object is a serializable node."""
-    return isinstance(obj, (Tree, Token)) or hasattr(obj, "__dict__")
 
 
 class UniversalDeserializer:
@@ -108,11 +94,9 @@ class UniversalDeserializer:
     children = [self.deserialize(child) for child in data["children"]]
     tree = Tree(data["name"], children)
 
-    # Apply metadata
+    # Apply position metadata
     if meta := data.get("meta"):
-      tree.meta = type("Meta", (), {})()
-      for key, value in meta.items():
-        setattr(tree.meta, key, value)
+      apply_position(tree, meta)
 
     return tree
 
