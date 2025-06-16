@@ -13,6 +13,7 @@ from pathlib import Path
 import logging
 import difflib
 import contextlib
+import signal
 
 # Import from reorganized package structure
 from syntax.concrete import parse_document, unparse_tree
@@ -265,7 +266,6 @@ def handle_ast_roundtrip(ctx: ParseContext) -> bool:
     return False
 
 
-# Logging Configuration
 class CompactFormatter(logging.Formatter):
   """Minimal log formatting."""
 
@@ -281,13 +281,29 @@ class CompactFormatter(logging.Formatter):
     return logging.Formatter(fmt).format(record)
 
 
+class SafeStreamHandler(logging.StreamHandler):
+  """Stream handler that ignores broken pipe errors."""
+
+  def emit(self, record):
+    try:
+      super().emit(record)
+    except BrokenPipeError:
+      pass
+    except IOError as e:
+      if e.errno == 32:  # EPIPE
+        pass
+      else:
+        raise
+
+
 def setup_logging(level: int) -> logging.Logger:
-  """Configure logging."""
+  """Configure logging with broken pipe protection."""
   logger = logging.getLogger()
   logger.setLevel(level)
   logger.handlers.clear()
 
-  handler = logging.StreamHandler(sys.stdout)
+  # Use safe handler instead of regular StreamHandler
+  handler = SafeStreamHandler(sys.stdout)
   handler.setFormatter(CompactFormatter())
   logger.addHandler(handler)
 
@@ -384,17 +400,41 @@ def main():
 
 @contextlib.contextmanager
 def cli_session(*args):
+  # Handle SIGPIPE for Unix pipelines
+  try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+  except AttributeError:
+    # Windows doesn't have SIGPIPE
+    pass
+
   rc = 0
-  try: yield
+
+  try:
+    yield
   except SystemExit as e:
     rc = e.code
-  except Exception:
-    logger.critical('Unhandled Exception', exc_info=True)
+  except BrokenPipeError:
     rc = 1
+  except IOError as e:
+    rc = 2
+    if e.errno not in {
+      32,
+    }:  # EPIPE
+      logger.critical("Unhandled IO Error", exc_info=True)
+  except Exception:
+    rc = 2
+    logger.critical("Unhandled Exception", exc_info=True)
   finally:
-    logging.shutdown()
-    sys.stdout.flush()
-  sys.exit(rc)
+    # Suppress broken pipe errors during cleanup
+    try:
+      logging.shutdown()
+      sys.stdout.flush()
+    except (BrokenPipeError, IOError):
+      pass
+
+  # Use os._exit to avoid further cleanup issues
+  os._exit(rc)
+
 
 if __name__ == "__main__":
   with cli_session():
