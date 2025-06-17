@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AST Builder Module
+Fixed AST Builder Module
 
-Transforms Concrete Syntax Trees into Abstract Syntax Trees.
+Corrects the node navigation to match actual CST structure.
 """
 
 from typing import List, Optional
@@ -14,7 +14,7 @@ from .nodes import Specification, Concept, StateDeclaration, Operation, Property
 
 
 class ASTBuilder:
-  """Build AST from CST by extracting semantic content."""
+  """Build AST from CST with corrected navigation."""
 
   def build(self, cst: Tree) -> Specification:
     """Transform CST to AST specification."""
@@ -24,14 +24,22 @@ class ASTBuilder:
       name=self._extract_from_child(header, "system_name", "Unnamed"), description=self._extract_description(header)
     )
 
-    # Extract sections
+    # Extract sections - FIXED: Look for nested structures
     if definitions := find_child(cst, "definitions"):
-      spec.concepts = self._extract_named_items(
-        definitions, "concept_def", Concept, "concept_name", "concept_description"
-      )
+      # Look for concept_list first, then concept_def within it
+      if concept_list := find_child(definitions, "concept_list"):
+        spec.concepts = self._extract_named_items(
+          concept_list,  # Search within concept_list, not definitions
+          "concept_def",
+          Concept,
+          "concept_name",
+          "concept_description",
+        )
 
     if states := find_child(cst, "state_section"):
-      spec.states = self._extract_states(states)
+      # Look for state_list first, then state_block within it
+      if state_list := find_child(states, "state_list"):
+        spec.states = self._extract_states_from_list(state_list)
 
     if operations := find_child(cst, "operations"):
       spec.operations = self._extract_operations(operations)
@@ -51,11 +59,7 @@ class ASTBuilder:
   def _extract_named_items(
     self, parent: Tree, item_type: str, constructor, name_field: str, desc_field: str = None
   ) -> List:
-    """
-    Generic extraction for named items.
-
-    Reduces duplication in extracting concepts, properties, etc.
-    """
+    """Generic extraction for named items."""
     items = []
     for node in find_all(parent, item_type):
       name = self._extract_from_child(node, name_field)
@@ -67,17 +71,18 @@ class ASTBuilder:
           items.append(constructor(name))
     return items
 
-  def _extract_states(self, state_section: Tree) -> List[StateDeclaration]:
-    """Extract state declarations."""
+  def _extract_states_from_list(self, state_list: Tree) -> List[StateDeclaration]:
+    """Extract state declarations from state_list."""
     states = []
 
-    for block in find_all(state_section, "state_block"):
-      if name := self._extract_from_child(block, "state_name"):
-        properties = []
-        if props := find_child(block, "state_properties"):
-          properties = [extract_text(line, "line") for line in find_all(props, "property_line")]
-
-        states.append(StateDeclaration(name, properties))
+    for block in find_all(state_list, "state_block"):
+      # Extract name from state_header
+      if header := find_child(block, "state_header"):
+        if name := self._extract_from_child(header, "state_name"):
+          properties = []
+          if props := find_child(block, "state_properties"):
+            properties = [extract_text(line, "line") for line in find_all(props, "property_line")]
+          states.append(StateDeclaration(name, properties))
 
     return states
 
@@ -88,17 +93,22 @@ class ASTBuilder:
     for op in find_all(operations_node, "operation"):
       trigger = self._extract_from_child(op, "trigger", "")
 
-      # Extract preconditions
-      preconditions = [extract_text(line, "line") for line in find_all(op, "precondition_line")]
+      # Find operation_body first
+      if body := find_child(op, "operation_body"):
+        # Extract preconditions from body
+        preconditions = []
+        if precond_node := find_child(body, "preconditions"):
+          preconditions = [extract_text(line, "line") for line in find_all(precond_node, "precondition_line")]
 
-      # Extract effects
-      effects = []
-      for effect in find_all(op, "effect"):
-        if content := find_child(effect, "effect_content"):
-          lines = extract_text(content, "lines")
-          effects.append(" ".join(lines))
+        # Extract effects from body
+        effects = []
+        if effects_node := find_child(body, "effects"):
+          for effect in find_all(effects_node, "effect"):
+            if content := find_child(effect, "effect_content"):
+              lines = extract_text(content, "lines")
+              effects.append(" ".join(lines))
 
-      operations.append(Operation(trigger, preconditions, effects))
+        operations.append(Operation(trigger, preconditions, effects))
 
     return operations
 
@@ -109,19 +119,24 @@ class ASTBuilder:
     # Extract constraints
     if constraint_list := find_child(constraints_node, "constraint_list"):
       for item in find_all(constraint_list, "constraint_item"):
-        if prop := self._extract_named_property(item):
-          properties.append(Property(prop[0], prop[1], "constraint"))
+        # FIXED: Look for named_property within constraint_item
+        if named_prop := find_child(item, "named_property"):
+          if prop := self._extract_named_property(named_prop):
+            properties.append(Property(prop[0], prop[1], "constraint"))
 
     # Extract guarantees
-    if guarantee_list := find_child(constraints_node, "guarantee_list"):
-      for item in find_all(guarantee_list, "guarantee_item"):
-        if prop := self._extract_named_property(item):
-          properties.append(Property(prop[0], prop[1], "guarantee"))
+    if guarantees := find_child(constraints_node, "guarantees"):
+      if guarantee_list := find_child(guarantees, "guarantee_list"):
+        for item in find_all(guarantee_list, "guarantee_item"):
+          # FIXED: Look for named_property within guarantee_item
+          if named_prop := find_child(item, "named_property"):
+            if prop := self._extract_named_property(named_prop):
+              properties.append(Property(prop[0], prop[1], "guarantee"))
 
     return properties
 
   def _extract_named_property(self, node: Tree) -> Optional[tuple[str, str]]:
-    """Extract name and content from property node."""
+    """Extract name and content from named_property node."""
     name = self._extract_from_child(node, "property_name")
     content = ""
 
@@ -146,5 +161,5 @@ class ASTBuilder:
 
 # Convenience function
 def build_ast(cst: Tree) -> Specification:
-  """Build AST from CST using default builder."""
+  """Build AST from CST using fixed builder."""
   return ASTBuilder().build(cst)
