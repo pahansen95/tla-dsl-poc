@@ -6,7 +6,7 @@ indentation tracking, and multi-line content aggregation.
 
 from typing import Optional
 
-from lexical import Lexer, Match, State, Stack, token, SourceNavigator
+from lexical import Lexer, Match, State, Stack, token
 
 
 class DSLLexer(Lexer):

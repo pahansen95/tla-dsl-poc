@@ -1,14 +1,15 @@
 """Parser implementation for Natural Specification Language.
 
-Provides recursive descent parsing with integrated CST construction,
-converting tokens from the lexer into a concrete syntax tree.
+Provides integrated parsing and CST construction through the
+lexical framework's unified Parser base class.
 """
 
 from typing import List, Optional
 
 from lexical import Parser, Token, FrozenNode, FrozenToken, LexicalContext, Position
 
-from .ast import *
+from .ast import Specification
+from .tokenize import DSLLexer
 from ..errors import SyntaxError
 
 
@@ -323,3 +324,35 @@ class DSLParser(Parser):
     """Get current token position for error reporting."""
     token = self.peek()
     return token.position if token else None
+
+
+# Public API function
+
+
+def parse(text: str, obs_context: Optional[LexicalContext] = None) -> Specification:
+  """
+  Parse DSL text to AST.
+
+  Args:
+      text: NSL specification text
+      obs_context: Optional observability context
+
+  Returns:
+      Parsed Specification AST
+
+  Raises:
+      TypeError: If text is not a string
+      LexicalError: If tokenization fails
+      SyntaxError: If parsing fails
+  """
+  # Validate input
+  if not isinstance(text, str):
+    raise TypeError(f"Expected str, got {type(text).__name__}")
+
+  # Lexical analysis
+  lexer = DSLLexer(obs_context)
+  tokens = list(lexer.lex(text))
+
+  # Syntax analysis - DSLParser builds AST directly
+  parser = DSLParser(tokens, obs_context)
+  return parser.parse_root()
