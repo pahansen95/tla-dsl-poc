@@ -1,4 +1,12 @@
-# ===== DSL Token Patterns =====
+"""Lexical analyzer for Natural Specification Language.
+
+Provides stateful lexing with context-aware token recognition,
+indentation tracking, and multi-line content aggregation.
+"""
+
+from typing import Optional
+
+from lexical import Lexer, Match, State, Stack, token, SourceNavigator
 
 
 class DSLLexer(Lexer):
@@ -326,4 +334,3 @@ class DSLLexer(Lexer):
 
     # Use parent lex implementation
     return super().lex(text)
-
