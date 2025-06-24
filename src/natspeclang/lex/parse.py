@@ -1,55 +1,15 @@
-# ===== AST Node Definitions =====
+"""Parser implementation for Natural Specification Language.
 
+Provides recursive descent parsing with integrated CST construction,
+converting tokens from the lexer into a concrete syntax tree.
+"""
 
-@dataclass(frozen=True, slots=True)
-class Concept:
-  """Domain concept definition."""
+from typing import List, Optional
 
-  name: str
-  description: str
+from lexical import Parser, Token, FrozenNode, FrozenToken, LexicalContext, Position
 
-
-@dataclass(frozen=True, slots=True)
-class StateDeclaration:
-  """State variable declaration."""
-
-  name: str
-  properties: tuple[str, ...] = ()
-  initial_condition: Optional[str] = None
-
-
-@dataclass(frozen=True, slots=True)
-class Operation:
-  """System operation with trigger and effects."""
-
-  trigger: str
-  preconditions: tuple[str, ...] = ()
-  effects: tuple[str, ...] = ()
-  unchanged: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class Property:
-  """System property (constraint or guarantee)."""
-
-  name: str
-  content: str
-  property_type: str  # 'constraint' or 'guarantee'
-
-
-@dataclass(frozen=True, slots=True)
-class Specification:
-  """Complete system specification."""
-
-  name: str
-  description: str
-  concepts: tuple[Concept, ...] = ()
-  states: tuple[StateDeclaration, ...] = ()
-  operations: tuple[Operation, ...] = ()
-  properties: tuple[Property, ...] = ()
-
-
-# ===== Parser with Integrated AST Building =====
+from .ast import *
+from ..errors import SyntaxError
 
 
 class DSLParser(Parser):
@@ -363,4 +323,3 @@ class DSLParser(Parser):
     """Get current token position for error reporting."""
     token = self.peek()
     return token.position if token else None
-
