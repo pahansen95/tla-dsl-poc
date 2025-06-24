@@ -1,4 +1,15 @@
-# ===== CST to AST Transformation =====
+"""CST to AST transformation logic.
+
+Provides transformation from Concrete Syntax Trees to Abstract Syntax Trees,
+extracting semantic information while validating structural constraints.
+"""
+
+from typing import List, Optional
+
+from lexical import SyntaxTree, NodeView
+
+from .ast import *
+from ..errors import SemanticError
 
 
 class ASTBuilder:
