@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from lexical import (
     Lexer, Parser, Token, pattern, token, rule,
     SyntaxTree, FrozenNode, FrozenToken,
-    LexicalContext, Position
+    LexicalContext, Position, Match
 )
 
 from .types import TokenType, TokenValue, FormatStyle

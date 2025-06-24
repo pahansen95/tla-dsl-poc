@@ -18,6 +18,7 @@ from .lex import (
     parse, format_ast, serialize_ast, deserialize_ast,
     serialize_cst, deserialize_cst, Specification, SyntaxTree
 )
+from lexical import FrozenNode
 
 
 # Representation types
