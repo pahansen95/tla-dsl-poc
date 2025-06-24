@@ -93,7 +93,7 @@ class EventHandler(Protocol):
 
 
 # Transformation types
-TransformResult = Union['SyntaxTree', 'Specification', str]
+TransformResult = Union[Any, str]  # Will be SyntaxTree, Specification, or str
 """Result of a transformation operation."""
 
 FormatStyle = dict[str, Any]
