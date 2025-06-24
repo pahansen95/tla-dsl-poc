@@ -8,16 +8,14 @@ while allowing access to individual components for advanced usage.
 # Import all public API components from their modules
 from .ast import Specification, Concept, StateDeclaration, Operation, Property
 from .tokenize import DSLLexer
-from .parse import DSLParser, parse
+from .parse import DSLParser
 from .transform import ASTBuilder
-from .format import ASTFormatter, format_ast
+from .format import ASTFormatter
 from .serde import (
   serialize_ast,
   deserialize_ast,
   serialize_cst,
   deserialize_cst,
-  parse_to_json,
-  format_from_json,
 )
 
 
@@ -33,11 +31,6 @@ __all__ = [
   "DSLParser",
   "ASTBuilder",
   "ASTFormatter",
-  # High-level functions
-  "parse",
-  "format_ast",
-  "parse_to_json",
-  "format_from_json",
   # Serialization
   "serialize_ast",
   "deserialize_ast",
