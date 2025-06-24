@@ -5,14 +5,9 @@ persistence, transport, and interoperability.
 """
 
 import json
-from typing import Optional
 
-from lexical import SyntaxTree, FrozenNode, LexicalContext
 
 from .ast import Specification, Concept, StateDeclaration, Operation, Property
-from .parse import parse
-from .format import format_ast
-from ..types import FormatStyle
 
 
 def serialize_ast(spec: Specification) -> str:
@@ -61,47 +56,5 @@ def deserialize_ast(json_str: str) -> Specification:
   return from_dict(data)
 
 
-def serialize_cst(tree: SyntaxTree) -> str:
-  """Serialize CST to JSON."""
-  # Simplified for integrated parser
-  return serialize_ast(tree.root)
-
-
-def deserialize_cst(json_str: str) -> SyntaxTree:
-  """Deserialize CST from JSON."""
-  # Simplified for integrated parser
-  spec = deserialize_ast(json_str)
-  return SyntaxTree(FrozenNode("specification", (spec,)))
-
-
-# Public API convenience functions
-
-
-def parse_to_json(text: str, obs_context: Optional[LexicalContext] = None) -> str:
-  """
-  Parse DSL text directly to JSON representation.
-
-  Args:
-      text: NSL specification text
-      obs_context: Optional observability context
-
-  Returns:
-      JSON string representation of AST
-  """
-  spec = parse(text, obs_context)
-  return serialize_ast(spec)
-
-
-def format_from_json(json_str: str, style: Optional[FormatStyle] = None) -> str:
-  """
-  Format JSON AST representation to DSL text.
-
-  Args:
-      json_str: JSON representation of AST
-      style: Optional formatting configuration
-
-  Returns:
-      Formatted DSL text
-  """
-  spec = deserialize_ast(json_str)
-  return format_ast(spec, style)
+# def serialize_cst(...): ...
+# def deserialize_cst(...) ...

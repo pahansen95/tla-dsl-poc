@@ -80,21 +80,3 @@ class ASTFormatter:
         lines.append("")
 
     return "\n".join(lines)
-
-
-# Public API function
-
-
-def format_ast(spec: Specification, style: Optional[FormatStyle] = None) -> str:
-  """
-  Format AST to DSL text.
-
-  Args:
-      spec: Specification AST to format
-      style: Optional formatting configuration
-
-  Returns:
-      Formatted DSL text
-  """
-  formatter = ASTFormatter(style)
-  return formatter.format(spec)
