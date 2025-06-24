@@ -6,17 +6,23 @@ specifications. Provides bidirectional transformations between textual DSL,
 concrete syntax trees, and abstract syntax trees.
 
 Basic Usage:
-    from nsl import parse, format_ast
+    from natspeclang import DSLLexer, DSLParser, ASTBuilder
+    from lexical import LexicalContext
 
     # Parse DSL text to AST
-    spec = parse(text)
+    lexer = DSLLexer()
+    tokens = list(lexer.lex(text))
 
-    # Format AST back to text
-    text = format_ast(spec)
+    parser = DSLParser(tokens)
+    cst = parser.parse()
+
+    builder = ASTBuilder()
+    ast = builder.build(cst)
 
 Advanced Usage:
-    from nsl import TransformationPipeline, LexicalContext
+    from natspeclang import TransformationPipeline
     from observability import SharedContext
+    from lexical import LexicalContext
 
     # With observability
     obs_context = LexicalContext(SharedContext.get())
@@ -25,8 +31,6 @@ Advanced Usage:
     # Transform with automatic type detection
     result = pipeline.transform(request)
 """
-
-# Public API exports
 
 # Core types
 from .types import (
@@ -44,11 +48,25 @@ from .types import (
 # Error types
 from .errors import NSLError, LexicalError, SyntaxError, SemanticError, TransformationError, SerializationError
 
-# AST node types
-from .lex import Concept, StateDeclaration, Operation, Property, Specification
-
-# High-level API
-from .lex import parse, format_ast, parse_to_json, format_from_json, serialize_ast, deserialize_ast
+# AST node types and core components from lex module
+from .lex import (
+  # AST nodes
+  Concept,
+  StateDeclaration,
+  Operation,
+  Property,
+  Specification,
+  # Core classes
+  DSLLexer,
+  DSLParser,
+  ASTBuilder,
+  ASTFormatter,
+  # Serialization
+  serialize_ast,
+  deserialize_ast,
+  serialize_cst,
+  deserialize_cst,
+)
 
 # Pipeline API
 from .pipeline import TransformationPipeline, TransformRequest, TypeInference
@@ -87,13 +105,16 @@ __all__ = [
   "Operation",
   "Property",
   "Specification",
-  # High-level API
-  "parse",
-  "format_ast",
-  "parse_to_json",
-  "format_from_json",
+  # Core classes
+  "DSLLexer",
+  "DSLParser",
+  "ASTBuilder",
+  "ASTFormatter",
+  # Serialization
   "serialize_ast",
   "deserialize_ast",
+  "serialize_cst",
+  "deserialize_cst",
   # Pipeline
   "TransformationPipeline",
   "TransformRequest",
