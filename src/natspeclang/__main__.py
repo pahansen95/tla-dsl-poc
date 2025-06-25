@@ -5,8 +5,11 @@ Allows the package to be executed as a module:
     python -m nsl [arguments]
 """
 
-import sys
-from .cli import main
-
 if __name__ == "__main__":
+  import sys
+  from observability import SharedContext
+
+  SharedContext.setup()
+  from .cli import main
+
   sys.exit(main())
