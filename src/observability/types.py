@@ -94,8 +94,7 @@ This design ensures that:
 The type system forms the contract that enables independent evolution of event producers and consumers while maintaining compatibility and safety.
 """
 
-from typing import Any, Callable, Dict, List, Protocol, TypedDict, Union
-from typing_extensions import NotRequired
+from typing import Any, Callable, Dict, List, Protocol, TypedDict, Union, NotRequired
 
 
 class EventDict(TypedDict):
