@@ -5,10 +5,12 @@ Natural Specification Language. These immutable structures form the
 core data model for parsed specifications.
 """
 
+# Standard library imports
 from dataclasses import dataclass
 from typing import Optional
 
 
+# AST node definitions with __slots__ for memory efficiency
 @dataclass(frozen=True, slots=True)
 class Concept:
   """Domain concept definition."""
@@ -55,3 +57,13 @@ class Specification:
   states: tuple[StateDeclaration, ...] = ()
   operations: tuple[Operation, ...] = ()
   properties: tuple[Property, ...] = ()
+
+
+# Explicit exports
+__all__ = [
+  "Concept",
+  "StateDeclaration",
+  "Operation",
+  "Property",
+  "Specification",
+]
