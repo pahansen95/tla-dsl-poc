@@ -18,13 +18,13 @@ class DSLLexer(Lexer):
   """
 
   # State tracking
-  section_state = State(initial="header")
-  indent_stack = Stack(initial=[0])
-  line_state = State(initial="start")
+  section_state = State(value="header")
+  indent_stack = Stack(value=[0])
+  line_state = State(value="start")
 
   # Track if we're collecting multi-line content
-  content_buffer = State(initial=None)
-  content_indent = State(initial=0)
+  content_buffer = State(value=None)
+  content_indent = State(value=0)
 
   # Section header patterns (Priority 10)
   @token(priority=10)
@@ -323,7 +323,7 @@ class DSLLexer(Lexer):
     """Reset state and lex the document."""
     # Reset all state
     self.section_state.reset()
-    self.indent_stack = Stack(initial=[0])
+    self.indent_stack = Stack(value=[0])
     self.line_state.reset()
     self.content_buffer.reset()
     self.content_indent.reset()
