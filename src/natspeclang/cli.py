@@ -7,8 +7,13 @@ transformation paths between formats.
 import sys
 import argparse
 
+from observability import SharedContext
+from observability.domains.logging import Logger
 from .pipeline import get_pipeline_builder, describe_pipeline
 from .format import FormatDetector
+
+# Module-level logger
+logger = Logger(__name__, SharedContext.get())
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -22,11 +27,11 @@ Examples:
   # Parse NSL to CST JSON
   %(prog)s -if nsl -of cst:json < spec.nsl > spec.cst.json
 
-  # Convert NSL file to AST
-  %(prog)s spec.nsl spec.ast
+  # Convert NSL file to AST with logging
+  %(prog)s --log spec.nsl spec.ast
 
-  # Pipeline through stdin/stdout
-  cat spec.nsl | %(prog)s -if nsl -of ast:json | jq .
+  # Pipeline with full tracing
+  cat spec.nsl | %(prog)s --trace -if nsl -of ast:json | jq .
 
 Formats:
   nsl, dsl     Natural Specification Language
@@ -52,7 +57,40 @@ Format specifications:
   parser.add_argument("--show-pipeline", action="store_true", help="Show transformation pipeline without executing")
   parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
+  # Observability options
+  parser.add_argument("--log", action="store_true", help="Enable logging output")
+  parser.add_argument("--trace", action="store_true", help="Enable lexical tracing (parse events)")
+  parser.add_argument("--metrics", action="store_true", help="Enable metrics collection")
+
   return parser
+
+
+def setup_observability(args) -> None:
+  """Configure observability based on CLI arguments."""
+  # If any observability is requested, initialize SharedContext with defaults
+  if args.log or args.trace or args.metrics:
+    # Use default configuration (stderr with timing)
+    SharedContext.setup()
+
+    # Configure domain filtering
+    context = SharedContext.get()
+
+    # Enable categories based on flags
+    enabled_categories = []
+    if args.log:
+      enabled_categories.append("log")
+    if args.trace:
+      enabled_categories.extend(["lex", "parse", "ast", "pipeline"])
+    if args.metrics:
+      enabled_categories.append("metric")
+
+    if enabled_categories:
+      context.enable_categories(*enabled_categories)
+  else:
+    # No observability - set up empty context
+    from observability import ObservabilityConfig
+
+    SharedContext.setup(ObservabilityConfig(handlers=[]))
 
 
 def main():
@@ -60,9 +98,21 @@ def main():
   parser = create_parser()
   args = parser.parse_args()
 
+  # Set up observability first
+  setup_observability(args)
+
   # Initialize components
   builder = get_pipeline_builder()
   detector = FormatDetector()
+
+  # Log startup
+  logger.info(
+    "Starting transformation",
+    input_format=args.input_format,
+    output_format=args.output_format,
+    input_file=args.input,
+    output_file=args.output,
+  )
 
   # Determine input format
   if args.input_format:
@@ -85,11 +135,13 @@ def main():
     # Default output format based on input
     output_format = detector.get_default_output_format(input_format)
 
+  logger.debug("Format detection complete", input_format=input_format, output_format=output_format)
+
   # Show pipeline if requested
   if args.show_pipeline:
     try:
       steps = describe_pipeline(input_format, output_format)
-      print(f"Transformation pipeline: {input_format.name} → {output_format.name}")
+      print(f"Transformation pipeline: {input_format} → {output_format}")
       for i, step in enumerate(steps):
         print(f"  {i + 1}. {step}")
     except ValueError as e:
@@ -103,10 +155,14 @@ def main():
     with open(args.input, "r", encoding="utf-8") as f:
       input_data = f.read()
 
+  logger.debug("Input read", size=len(input_data))
+
   # Execute transformation
   try:
     result = builder.transform(input_data, input_format, output_format)
+    logger.info("Transformation successful")
   except Exception as e:
+    logger.error("Transformation failed", error=str(e))
     if args.debug:
       import traceback
 
@@ -130,4 +186,5 @@ def main():
       if not output_data.endswith("\n"):
         f.write("\n")
 
+  logger.info("Transformation complete")
   return 0

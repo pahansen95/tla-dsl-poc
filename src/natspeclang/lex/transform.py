@@ -6,10 +6,15 @@ abstract syntax tree representations.
 
 from typing import Optional
 
+from observability import SharedContext
+from observability.domains.logging import Logger
 from lexical import SyntaxTree, NodeView
 
 from .ast import Specification, Concept, StateDeclaration, Operation, Property
 from ..errors import SemanticError
+
+# Module-level logger
+logger = Logger(__name__, SharedContext.get())
 
 
 class ASTBuilder:
@@ -20,16 +25,29 @@ class ASTBuilder:
 
   def build(self, tree: SyntaxTree) -> Specification:
     """Build AST from syntax tree."""
+    logger.debug("Starting AST build from CST")
+
     root = tree.root
     if root.kind != "specification":
       raise SemanticError(f"Expected specification node, got {root.kind}", node_type=root.kind)
 
     # Extract sections
     header_name, header_desc = self._extract_header(root)
+    logger.debug(f"Extracted header: {header_name}")
+
     concepts = self._extract_concepts(root)
     states = self._extract_states(root)
     operations = self._extract_operations(root)
     constraints, guarantees = self._extract_properties(root)
+
+    logger.info(
+      "AST build complete",
+      concepts=len(concepts),
+      states=len(states),
+      operations=len(operations),
+      constraints=len(constraints),
+      guarantees=len(guarantees),
+    )
 
     return Specification(
       name=header_name,

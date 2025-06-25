@@ -6,7 +6,12 @@ indentation tracking, and multi-line content aggregation.
 
 from typing import Optional
 
+from observability import SharedContext
+from observability.domains.logging import Logger
 from lexical import Lexer, Match, State, Stack, token
+
+# Module-level logger
+logger = Logger(__name__, SharedContext.get())
 
 
 class DSLLexer(Lexer):
@@ -321,6 +326,8 @@ class DSLLexer(Lexer):
   # Override lex to reset state between documents
   def lex(self, text: str):
     """Reset state and lex the document."""
+    logger.debug("Starting lexical analysis", size=len(text))
+
     # Reset all state
     self.section_state.reset()
     self.indent_stack = Stack(value=[0])
@@ -333,4 +340,7 @@ class DSLLexer(Lexer):
       text += "\n"
 
     # Use parent lex implementation
-    return super().lex(text)
+    tokens = list(super().lex(text))
+
+    logger.debug("Lexical analysis complete", token_count=len(tokens))
+    return tokens

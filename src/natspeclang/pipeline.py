@@ -8,6 +8,11 @@ formats, enabling seamless transformations through intermediate stages.
 from collections import deque
 from typing import Any, Dict, Final, List, Protocol, Tuple
 
+# Observability imports
+from observability import SharedContext
+from observability.domains.logging import Logger
+from lexical import LexicalContext
+
 # Local imports
 from .lex import (
   DSLLexer,
@@ -19,8 +24,10 @@ from .lex import (
   serialize_cst,
   deserialize_cst,
 )
-from lexical import SyntaxTree, LexicalContext
+from lexical import SyntaxTree
 
+# Module-level logger
+logger = Logger(__name__, SharedContext.get())
 
 # Module constants
 DEFAULT_CACHE_SIZE: Final[int] = 100
@@ -77,8 +84,17 @@ class PipelineBuilder:
 
   def __init__(self, obs_context: LexicalContext = None):
     """Initialize pipeline builder with optional observability."""
+    # Use SharedContext if no explicit context provided
+    if obs_context is None:
+      try:
+        shared_ctx = SharedContext.get()
+        obs_context = LexicalContext(shared_ctx)
+      except RuntimeError:
+        # SharedContext not initialized, use null context
+        obs_context = LexicalContext.null()
+
     self.transforms: Dict[Tuple[str, str], TransformFunction] = {}
-    self._obs = obs_context or LexicalContext.null()
+    self._obs = obs_context
     self._cache: Dict[Tuple[str, str], List[TransformFunction]] = {}
     self._cache_size = DEFAULT_CACHE_SIZE
     self._register_transforms()
@@ -173,6 +189,8 @@ class PipelineBuilder:
 
   def transform(self, data: Any, source: str, target: str) -> Any:
     """Execute transformation pipeline from source to target format."""
+    logger.info(f"Transforming {source} to {target}")
+
     # Emit transform start
     if self._obs.has_handlers():
       self._obs.emit_event("pipeline.transform.start", source=source, target=target)
@@ -184,6 +202,7 @@ class PipelineBuilder:
       if self._obs.has_handlers():
         self._obs.emit_event("pipeline.step.start", step=i, transform=transform.__name__)
 
+      logger.debug(f"Pipeline step {i}: {transform.__name__}")
       result = transform(result)
 
       if self._obs.has_handlers():
@@ -192,6 +211,7 @@ class PipelineBuilder:
     if self._obs.has_handlers():
       self._obs.emit_event("pipeline.transform.complete", source=source, target=target)
 
+    logger.info(f"Transformation complete: {source} → {target}")
     return result
 
   def describe_pipeline(self, source: str, target: str) -> List[str]:
@@ -247,12 +267,15 @@ class PipelineBuilder:
 
 
 # Module-level instances
-_pipeline_builder: PipelineBuilder = PipelineBuilder()
+_pipeline_builder: PipelineBuilder = None
 
 
 # Public functions
 def get_pipeline_builder() -> PipelineBuilder:
   """Get the global pipeline builder instance."""
+  global _pipeline_builder
+  if _pipeline_builder is None:
+    _pipeline_builder = PipelineBuilder()
   return _pipeline_builder
 
 
